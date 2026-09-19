@@ -3,8 +3,13 @@
 -- CƠ SỞ DỮ LIỆU MYSQL 8.0 CHUẨN 3NF TOÀN DIỆN (SYNCHRONIZED)
 -- Thời gian cập nhật tự động: 2026-09-17 15:44:25
 -- =====================================================================
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
 CREATE DATABASE IF NOT EXISTS `smartlib_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE `smartlib_db`;
+SET NAMES utf8mb4;
+
 
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS `notifications`;

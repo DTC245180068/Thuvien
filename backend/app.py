@@ -83,6 +83,7 @@ from export_service import (
 from ai_cataloging import router as ai_catalog_router
 from ai_text2sql import router as ai_text2sql_router
 from anomaly_detection import router as anomaly_detection_router
+from ai_reader_agent import router as ai_reader_agent_router
 
 app = FastAPI(
     title="SmartLib API",
@@ -102,6 +103,7 @@ app.add_middleware(
 app.include_router(ai_catalog_router)
 app.include_router(ai_text2sql_router)
 app.include_router(anomaly_detection_router)
+app.include_router(ai_reader_agent_router)
 
 @app.get("/api/health")
 def health_check():

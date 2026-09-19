@@ -8,8 +8,10 @@ import BorrowModal from '../components/BorrowModal';
 import {
   Search, BookOpen, Clock, CheckCircle,
   BookMarked, ArrowRight, ChevronLeft, ChevronRight,
-  Lock, CreditCard, X, Plus, AlertCircle, Check, Filter, Download
+  Lock, CreditCard, X, Plus, AlertCircle, Check, Filter, Download,
+  QrCode, FileText
 } from 'lucide-react';
+import QRCode from 'qrcode';
 import { exportApi } from '../services/exportApi';
 import FeaturedCarousel from '../components/FeaturedCarousel';
 import UpcomingBooksSection, { UPCOMING_BOOKS } from '../components/UpcomingBooksSection';
@@ -38,6 +40,8 @@ export default function ReaderPortal({ activeTab, onTabChange }) {
   const [borrowModalOpen, setBorrowModalOpen] = useState(false);
   const [borrowTargetBook, setBorrowTargetBook] = useState(null);
   const [returnConfirmRecord, setReturnConfirmRecord] = useState(null);
+  const [qrReturnRecord, setQrReturnRecord] = useState(null);
+  const [qrReturnDataUrl, setQrReturnDataUrl] = useState('');
   const [isReturning, setIsReturning] = useState(false);
   const [renewRecord, setRenewRecord] = useState(null);
   const [renewDays, setRenewDays] = useState(7);
@@ -53,6 +57,24 @@ export default function ReaderPortal({ activeTab, onTabChange }) {
   const [reserveModalOpen, setReserveModalOpen] = useState(false);
   const [reserveSearch, setReserveSearch] = useState('');
   const [reserveFilterTab, setReserveFilterTab] = useState('all');
+
+  // Sinh mã QR phiếu mượn khi độc giả bấm "Mã QR trả sách"
+  useEffect(() => {
+    if (qrReturnRecord) {
+      const payload = `SMARTLIB-RECEIPT-${qrReturnRecord.id}-${encodeURIComponent(qrReturnRecord.bookTitle || 'Book')}`;
+      QRCode.toDataURL(payload, {
+        width: 240,
+        margin: 1,
+        color: { dark: '#1e1b4b', light: '#ffffff' }
+      })
+        .then(url => setQrReturnDataUrl(url))
+        .catch(err => {
+          setQrReturnDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(payload)}`);
+        });
+    } else {
+      setQrReturnDataUrl('');
+    }
+  }, [qrReturnRecord]);
 
   useEffect(() => {
     if (api.getSettings) {
@@ -1016,15 +1038,25 @@ export default function ReaderPortal({ activeTab, onTabChange }) {
 
                     <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        {/* Nút Trả sách cho tất cả các sách đang mượn */}
+                        {/* Nút Xuất trình Mã QR để Thủ thư quét nhận trả sách tại quầy */}
                         {canReturn ? (
                           <button
                             type="button"
-                            onClick={() => setReturnConfirmRecord(r)}
-                            className="btn btn-return btn-table-action"
-                            title="Trả sách về thư viện"
+                            onClick={() => setQrReturnRecord(r)}
+                            className="btn btn-table-action"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+                              color: '#ffffff',
+                              border: 'none',
+                              fontWeight: 700,
+                              boxShadow: '0 2px 6px rgba(79, 70, 229, 0.25)'
+                            }}
+                            title="Xuất trình mã QR phiếu mượn cho thủ thư quét nhận trả sách tại quầy"
                           >
-                            <CheckCircle size={14} /> Trả sách
+                            <QrCode size={14} /> Mã QR trả sách
                           </button>
                         ) : null}
 
@@ -1953,8 +1985,8 @@ export default function ReaderPortal({ activeTab, onTabChange }) {
         onPaymentSuccess={handleVNPaySuccess}
       />
 
-      {/* DIV Xác nhận Trả sách (Thay thế hoàn toàn thông báo của trình duyệt) */}
-      {returnConfirmRecord && typeof document !== 'undefined' && createPortal(
+      {/* MODAL XUẤT TRÌNH MÃ QR TRẢ SÁCH TẠI QUẦY (ĐỘC GIẢ) */}
+      {qrReturnRecord && typeof document !== 'undefined' && createPortal(
         <div
           style={{
             position: 'fixed',
@@ -1964,8 +1996,8 @@ export default function ReaderPortal({ activeTab, onTabChange }) {
             bottom: 0,
             width: '100vw',
             height: '100vh',
-            background: 'rgba(15, 23, 42, 0.45)',
-            backdropFilter: 'blur(3px)',
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(4px)',
             zIndex: 999999,
             display: 'flex',
             alignItems: 'center',
@@ -1973,57 +2005,167 @@ export default function ReaderPortal({ activeTab, onTabChange }) {
             padding: '20px',
             boxSizing: 'border-box'
           }}
-          onClick={() => !isReturning && setReturnConfirmRecord(null)}
+          onClick={() => setQrReturnRecord(null)}
         >
           <div
             style={{
               background: '#ffffff',
-              borderRadius: '16px',
-              padding: '26px 28px',
-              maxWidth: '420px',
+              borderRadius: '20px',
+              padding: '28px',
+              maxWidth: '440px',
               width: '100%',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
               textAlign: 'center',
-              margin: 'auto'
+              margin: 'auto',
+              position: 'relative',
+              overflow: 'hidden'
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div
+            {/* Nút đóng */}
+            <button
+              type="button"
+              onClick={() => setQrReturnRecord(null)}
               style={{
-                width: '52px',
-                height: '52px',
+                position: 'absolute',
+                top: '16px',
+                right: '16px',
+                background: '#f1f5f9',
+                border: 'none',
                 borderRadius: '50%',
-                background: '#e0f2fe',
+                width: '32px',
+                height: '32px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                color: '#64748b',
+                cursor: 'pointer'
+              }}
+            >
+              <X size={18} />
+            </button>
+
+            {/* Icon & Title */}
+            <div
+              style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '12px',
+                background: '#eef2ff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 12px auto',
+                color: '#4f46e5'
+              }}
+            >
+              <QrCode size={24} />
+            </div>
+
+            <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', margin: '0 0 6px 0' }}>
+              Mã QR Trả Sách Tại Quầy
+            </h3>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 16px 0', lineHeight: 1.5 }}>
+              Vui lòng xuất trình mã này cho Thủ thư khi mang sách đến quầy trả
+            </p>
+
+            {/* Khung hiển thị QR code */}
+            <div
+              style={{
+                background: '#f8fafc',
+                border: '2px dashed #cbd5e1',
+                borderRadius: '16px',
+                padding: '16px',
+                display: 'inline-block',
                 margin: '0 auto 16px auto'
               }}
             >
-              <CheckCircle size={28} color="#0284c7" />
+              {qrReturnDataUrl ? (
+                <img
+                  src={qrReturnDataUrl}
+                  alt={`Mã QR Phiếu #${qrReturnRecord.id}`}
+                  style={{ width: '180px', height: '180px', display: 'block', margin: '0 auto' }}
+                />
+              ) : (
+                <div style={{ width: '180px', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <QrCode size={48} color="#94a3b8" />
+                </div>
+              )}
+              <span style={{ fontSize: '12px', fontWeight: 700, color: '#1e293b', display: 'block', marginTop: '8px' }}>
+                MÃ PHIẾU: #{qrReturnRecord.id}
+              </span>
             </div>
-            <h3 style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a', margin: '0 0 10px 0' }}>
-              Xác nhận trả sách
-            </h3>
-            <p style={{ fontSize: '13.5px', color: '#64748b', lineHeight: 1.6, margin: '0 0 22px 0' }}>
-              Bạn có chắc chắn muốn hoàn tất trả cuốn sách <strong style={{ color: '#0f172a' }}>"{returnConfirmRecord.bookTitle}"</strong> (Phiếu #{returnConfirmRecord.id}) tại quầy thư viện không?
-            </p>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+
+            {/* Thông tin phiếu */}
+            <div
+              style={{
+                background: '#f1f5f9',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                textAlign: 'left',
+                fontSize: '13px',
+                marginBottom: '18px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px'
+              }}
+            >
+              <div><strong>Sách:</strong> <span style={{ color: '#2563eb', fontWeight: 600 }}>{qrReturnRecord.bookTitle}</span></div>
+              <div><strong>Người mượn:</strong> <span>{qrReturnRecord.readerName || user?.fullName}</span></div>
+              <div><strong>Hạn trả:</strong> <span style={{ color: qrReturnRecord.status === 'Quá hạn' ? '#dc2626' : '#0f172a', fontWeight: qrReturnRecord.status === 'Quá hạn' ? 700 : 400 }}>{(qrReturnRecord.returnDate || qrReturnRecord.dueDate || '').substring(0, 10)}</span></div>
+            </div>
+
+            {/* Lưu ý nghiệp vụ */}
+            <div
+              style={{
+                fontSize: '12px',
+                color: '#b45309',
+                background: '#fef3c7',
+                border: '1px solid #fde68a',
+                borderRadius: '8px',
+                padding: '8px 12px',
+                lineHeight: 1.4,
+                marginBottom: '16px',
+                textAlign: 'left'
+              }}
+            >
+              ⚠️ <strong>Lưu ý:</strong> Để đảm bảo kiểm kê sách vật lý, độc giả không thể tự xác nhận trả sách từ xa. Thủ thư sẽ quét mã này để hoàn tất nhận sách vào kho.
+            </div>
+
+            {/* Các nút tải */}
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+              {qrReturnDataUrl && (
+                <a
+                  href={qrReturnDataUrl}
+                  download={`SmartLib_Phieu_${qrReturnRecord.id}_QR.png`}
+                  className="btn btn-outline"
+                  style={{
+                    fontSize: '12.5px',
+                    padding: '8px 14px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    textDecoration: 'none'
+                  }}
+                >
+                  <Download size={13} /> Tải ảnh QR
+                </a>
+              )}
               <button
                 type="button"
-                onClick={() => setReturnConfirmRecord(null)}
-                disabled={isReturning}
-                className="btn btn-outline btn-modal-action"
+                onClick={() => {
+                  exportApi.downloadBorrowReceiptPdf(qrReturnRecord.id);
+                }}
+                className="btn btn-primary"
+                style={{
+                  fontSize: '12.5px',
+                  padding: '8px 14px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
               >
-                Hủy
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmReturn}
-                disabled={isReturning}
-                className="btn btn-return btn-modal-action"
-              >
-                {isReturning ? 'Đang xử lý...' : 'Xác nhận trả sách'}
+                <FileText size={13} /> Tải phiếu PDF
               </button>
             </div>
           </div>

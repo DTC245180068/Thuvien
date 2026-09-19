@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, BookOpen, QrCode, BookMarked, Edit2, Trash2, Download, Clock, AlertCircle } from 'lucide-react';
+import { X, BookOpen, QrCode, BookMarked, Edit2, Trash2, Download, Clock, AlertCircle, Printer } from 'lucide-react';
 import QRCode from 'qrcode';
 
 export default function BookDetailModal({ book, isOpen, onClose, onBorrow, onEdit, onDelete, isAdmin, onReserve, onCancelReserve, activeReservationCount = 0, isUserLocked = false }) {
@@ -17,9 +17,11 @@ export default function BookDetailModal({ book, isOpen, onClose, onBorrow, onEdi
 
   useEffect(() => {
     if (book && !isUpcoming) {
-      const qrPayload = `SMARTLIB-BOOK-ID:${book.id}|${book.title}|Tác giả:${book.author || 'Chưa rõ'}|Thể loại:${book.category || 'Khác'}`;
-      QRCode.toDataURL(qrPayload, {
-        width: 220,
+      // 🚀 URL Deep-Link trực tiếp: quét bằng Camera điện thoại tại giá sách sẽ mở ngay trang chi tiết sách
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const bookLink = `${origin}/?bookId=${book.id}`;
+      QRCode.toDataURL(bookLink, {
+        width: 240,
         margin: 1,
         color: {
           dark: '#1e40af',
@@ -29,10 +31,50 @@ export default function BookDetailModal({ book, isOpen, onClose, onBorrow, onEdi
         .then(url => setQrCodeDataUrl(url))
         .catch(err => {
           console.error('Lỗi tạo mã QR client-side:', err);
-          setQrCodeDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrPayload)}`);
+          setQrCodeDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(bookLink)}`);
         });
     }
   }, [book, isUpcoming]);
+
+  const handlePrintLabel = () => {
+    if (!book || !qrCodeDataUrl) return;
+    const printWin = window.open('', '_blank', 'width=450,height=550');
+    if (printWin) {
+      printWin.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Tem Nhãn Gáy Sách #${book.id} - SmartLib</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; text-align: center; }
+            .label-card { border: 2px dashed #3b82f6; border-radius: 12px; padding: 16px; max-width: 320px; margin: 0 auto; background: #fafafa; }
+            .lib-name { font-size: 11px; font-weight: 800; color: #1e40af; text-transform: uppercase; letter-spacing: 0.5px; }
+            .title { font-size: 14px; font-weight: 700; color: #0f172a; margin: 8px 0 4px; line-height: 1.3; }
+            .author { font-size: 12px; color: #64748b; margin-bottom: 12px; }
+            .qr-img { width: 140px; height: 140px; margin: 0 auto; display: block; }
+            .call-number { font-size: 13px; font-weight: 800; color: #1e40af; margin-top: 10px; background: #dbeafe; padding: 4px 8px; border-radius: 6px; display: inline-block; }
+            .instruction { font-size: 10px; color: #94a3b8; margin-top: 8px; }
+            @media print { .no-print { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="label-card">
+            <div class="lib-name">Thư Viện Thông Minh SmartLib</div>
+            <div class="title">${book.title}</div>
+            <div class="author">Tác giả: ${book.author || 'Chưa rõ'}</div>
+            <img class="qr-img" src="${qrCodeDataUrl}" alt="QR Code" />
+            <div class="call-number">MÃ SÁCH: SL-${String(book.id).padStart(4, '0')}</div>
+            <div class="instruction">Quét mã QR bằng Camera điện thoại để xem chi tiết & mượn sách</div>
+          </div>
+          <script>
+            window.onload = function() { window.print(); };
+          </script>
+        </body>
+        </html>
+      `);
+      printWin.document.close();
+    }
+  };
 
   if (!isOpen || !book) return null;
 
@@ -120,29 +162,57 @@ export default function BookDetailModal({ book, isOpen, onClose, onBorrow, onEdi
                   <span style={{ fontSize: '11.5px', color: '#0f172a', fontWeight: 700, display: 'block', marginTop: '6px' }}>
                     Mã QR Sách #{book.id}
                   </span>
-                  {qrCodeDataUrl && (
-                    <a
-                      href={qrCodeDataUrl}
-                      download={`SmartLib_QR_Sach_${book.id}.png`}
-                      style={{
-                        fontSize: '11px',
-                        color: '#2563eb',
-                        fontWeight: 600,
-                        textDecoration: 'none',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '4px',
-                        marginTop: '4px',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        background: '#eff6ff'
-                      }}
-                      title="Nhấp để tải ảnh mã QR (PNG) về máy"
-                    >
-                      <Download size={11} /> Tải mã QR
-                    </a>
-                  )}
+                  <span style={{ fontSize: '10px', color: '#64748b', display: 'block', margin: '2px 0 6px', lineHeight: 1.2 }}>
+                    📱 Quét bằng Camera điện thoại để mở trực tiếp
+                  </span>
+                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                    {qrCodeDataUrl && (
+                      <a
+                        href={qrCodeDataUrl}
+                        download={`SmartLib_QR_Sach_${book.id}.png`}
+                        style={{
+                          fontSize: '11px',
+                          color: '#2563eb',
+                          fontWeight: 600,
+                          textDecoration: 'none',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '4px',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          background: '#eff6ff',
+                          border: '1px solid #bfdbfe'
+                        }}
+                        title="Nhấp để tải ảnh mã QR (PNG) về máy"
+                      >
+                        <Download size={11} /> Tải ảnh
+                      </a>
+                    )}
+                    {qrCodeDataUrl && (
+                      <button
+                        type="button"
+                        onClick={handlePrintLabel}
+                        style={{
+                          fontSize: '11px',
+                          color: '#047857',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '4px',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          background: '#ecfdf5',
+                          border: '1px solid #a7f3d0'
+                        }}
+                        title="In tem nhãn dán gáy sách thư viện"
+                      >
+                        <Printer size={11} /> In tem gáy
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

@@ -1,19 +1,37 @@
 import { AI_CONFIG, getActiveApiKey } from '../config/aiConfig';
 
 /**
- * Tri thức tích hợp sẵn của Trợ lý Thư viện khi chưa có API Key
- * Chuẩn hóa schema output theo đúng đặc tả Word Chương 2:
+ * Tri thức tích hợp sẵn của Trợ lý Thư viện khi chưa kết nối được Backend
+ * Chuẩn hóa schema output theo đúng đặc tả:
  * {
  *   found: boolean,
  *   answer: string,
+ *   tool_call: { name: string, arguments: object, status: string },
  *   suggested_books: [{ book_id: number, title: string, author: string, reason: string }],
  *   intent: string
  * }
  */
-const generateLocalSmartResponse = (question, books = []) => {
+const generateLocalSmartResponse = (question, books = [], userObj = null) => {
   const q = (question || '').toLowerCase().trim();
+  const userName = userObj?.fullName || userObj?.FullName || userObj?.username || '';
+  const greeting = userName ? `Chào bạn ${userName} nha! ✨` : 'Chào bạn nha! ✨';
 
-  // 1. Hỏi về quy định mượn / hạn trả sách
+  // 1. Hỏi về sách đang mượn cá nhân
+  if (q.includes('mượn gì') || q.includes('đang mượn') || q.includes('hạn trả') || q.includes('sách của tôi') || q.includes('danh sách mượn')) {
+    return {
+      found: true,
+      answer: `${greeting} Bạn vui lòng mở mục **"Sách đang mượn & Chờ duyệt"** trên Cổng Độc giả để theo dõi chính xác danh sách sách, hạn trả và tình trạng phiếu mượn thời gian thực nhé! 📋`,
+      tool_call: {
+        name: 'get_my_active_borrows',
+        arguments: { status_filter: 'Đang mượn' },
+        status: 'executed'
+      },
+      suggested_books: [],
+      intent: 'get_my_active_borrows'
+    };
+  }
+
+  // 2. Hỏi về quy định mượn / hạn trả sách
   if (q.includes('mượn') && (q.includes('hạn') || q.includes('bao lâu') || q.includes('quy định') || q.includes('thời gian') || q.includes('tối đa'))) {
     return {
       found: true,
@@ -22,32 +40,42 @@ const generateLocalSmartResponse = (question, books = []) => {
 - **Thời hạn mượn:** Bạn được mượn sách về nhà tối đa **14 ngày** (mượn tại chỗ trong ngày).
 - **Số lượng:** Mỗi độc giả được mượn cùng lúc **tối đa 5 cuốn** theo quy định thư viện.
 - **Phí trễ hạn:** Nếu trả quá hạn, phí phạt là **2.000 đ/ngày/cuốn**. Bạn nhớ trả đúng hạn nha!
-- **Hàng chờ đặt trước:** Nếu sách hết, bạn có thể Đặt trước để giữ chỗ ưu tiên FIFO (48h).
+- **Gia hạn:** Được bấm **Xin gia hạn tối đa 2 lần** trước ngày hết hạn.
 
 Bạn đang muốn tìm đọc cuốn sách nào không? Cứ nhắn mình nhé! 😊`,
+      tool_call: {
+        name: 'get_library_policy',
+        arguments: { topic: 'due_dates' },
+        status: 'executed'
+      },
       suggested_books: [],
-      intent: 'inquiry'
+      intent: 'get_library_policy'
     };
   }
 
-  // 2. Hỏi về cách trả sách
-  if (q.includes('trả sách') || q.includes('cách trả') || q.includes('hoàn tất') || q.includes('phạt')) {
+  // 3. Hỏi về cách trả sách bằng Mã QR tại quầy
+  if (q.includes('trả sách') || q.includes('cách trả') || q.includes('mã qr') || q.includes('quét mã')) {
     return {
       found: true,
-      answer: `Trả sách thì cực kỳ đơn giản chỉ mất vài giây thôi nè! 🔄
+      answer: `Quy trình trả sách chuẩn thư viện SmartLib cực kỳ nhanh chóng và an toàn bạn nha: 🔄✨
 
-1. Bạn vào mục **"Sách đang mượn & Chờ duyệt"** trên Cổng Độc giả.
-2. Tại cuốn sách bạn muốn trả, bấm nút **[Trả sách]** màu xanh lá.
-3. Hộp thoại xác nhận hiện ra, bạn chỉ việc ấn **[Xác nhận]** là sách sẽ được cập nhật sang **Lịch sử mượn trả**.
-4. Nếu trả đúng hạn, bạn sẽ nhận được huy hiệu **✓ Đúng hạn**!
+1. Bạn vào mục **"Sách đang mượn"** trên Cổng Độc giả.
+2. Bấm nút gradient tím/xanh **[Mã QR trả sách]** tại cuốn sách muốn trả.
+3. Mang sách vật lý đến quầy thư viện và xuất trình mã QR phiếu mượn cho Thủ thư.
+4. Thủ thư sẽ quét mã để kiểm tra và xác nhận nhận lại sách về kho trong 1-Click.
 
-Có cuốn nào bạn đọc xong rồi muốn trả để mượn cuốn mới không? 😉`,
+⚠️ *Lưu ý:* Để đảm bảo kiểm kê sách vật lý, độc giả không tự bấm trả từ xa mà cần bàn giao tại quầy nhé!`,
+      tool_call: {
+        name: 'get_library_policy',
+        arguments: { topic: 'qr_return_process' },
+        status: 'executed'
+      },
       suggested_books: [],
-      intent: 'inquiry'
+      intent: 'get_library_policy'
     };
   }
 
-  // 3. Hỏi về gợi ý sách phát triển bản thân / kỹ năng
+  // 4. Hỏi về gợi ý sách phát triển bản thân / kỹ năng
   if (q.includes('phát triển bản thân') || q.includes('kỹ năng') || q.includes('tư duy') || q.includes('đắc nhân tâm') || q.includes('sách hay') || q.includes('gợi ý')) {
     const matched = books.filter(b => 
       (b.category && (b.category.includes('Kỹ năng') || b.category.includes('Tâm lý') || b.category.includes('Kinh doanh'))) ||
@@ -67,60 +95,48 @@ Có cuốn nào bạn đọc xong rồi muốn trả để mượn cuốn mới 
       answer: `U là trời, bạn hỏi đúng tủ của mình rồi! Dưới đây là những cuốn sách phát triển bản thân và tư duy cực kỳ bổ ích đang có sẵn trong kho thư viện SmartLib: 🌟
 
 Bạn có thể bấm vào thẻ sách gợi ý bên dưới để xem chi tiết hoặc đăng ký mượn ngay nhé!`,
+      tool_call: {
+        name: 'recommend_books',
+        arguments: { genre: 'Kỹ năng sống', limit: 3 },
+        status: 'executed'
+      },
       suggested_books: suggested,
-      intent: 'recommendation'
+      intent: 'recommend_books'
     };
   }
 
-  // 4. Hỏi về sách công nghệ / lập trình / AI
-  if (q.includes('công nghệ') || q.includes('lập trình') || q.includes('python') || q.includes('ai') || q.includes('cntt') || q.includes('khoa học')) {
-    const matched = books.filter(b => 
-      (b.category && (b.category.includes('Công nghệ') || b.category.includes('Khoa học'))) ||
-      (b.title && (b.title.toLowerCase().includes('python') || b.title.toLowerCase().includes('code') || b.title.toLowerCase().includes('trí tuệ') || b.title.toLowerCase().includes('lập trình')))
-    ).slice(0, 3);
-
-    const fallbackMatched = matched.length > 0 ? matched : books.slice(0, 3);
-    const suggested = fallbackMatched.map(b => ({
-      book_id: b.id,
-      title: b.title,
-      author: b.author || 'Chuyên gia CNTT',
-      reason: `Tài liệu chuẩn mực giúp nâng cao tư duy thuật toán và kỹ năng lập trình thực chiến.`
-    }));
-
-    return {
-      found: true,
-      answer: `Dân mê công nghệ điểm danh! 💻🔥 SmartLib có những đầu sách công nghệ và lập trình chất lượng cao dành riêng cho bạn:`,
-      suggested_books: suggested,
-      intent: 'recommendation'
-    };
-  }
-
-  // 5. Tìm kiếm trực tiếp tên sách trong kho
+  // 5. Kiểm tra tình trạng / tồn kho cuốn sách
   const foundBooks = books.filter(b => 
     b.title && b.title.toLowerCase().includes(q)
   );
   if (foundBooks.length > 0) {
     const b = foundBooks[0];
+    const avail = b.available ?? b.available_copies ?? 1;
     return {
       found: true,
-      answer: `Ting ting! Mình tìm thấy cuốn này trong kho sách SmartLib rồi nè bạn ơi: 🎉
+      answer: `Ting ting! Mình đã tra cứu trực tiếp kho sách theo yêu cầu của bạn nè: 🎉
 
 - 📖 **Tên sách:** **${b.title}**
 - ✍️ **Tác giả:** ${b.author || 'Đang cập nhật'}
 - 🏷️ **Thể loại:** ${b.category || 'Tổng hợp'}
-- 📦 **Tình trạng:** Sẵn sàng cho mượn tại thư viện.
-- 📝 **Mô tả:** ${b.desc || 'Tác phẩm hay và bổ ích, được nhiều bạn đọc yêu thích.'}
+- 📦 **Tình trạng:** ${avail > 0 ? `🟢 Còn sẵn ${avail} cuốn cho mượn` : '🔴 Tạm hết sách sẵn có'}
+- 📝 **Mô tả:** ${b.desc || b.description || 'Tác phẩm hay và bổ ích, được nhiều bạn đọc yêu thích.'}
 
 Bạn có thể bấm vào thẻ sách bên dưới để xem chi tiết hoặc mượn về nhà đọc ngay nha! ✨`,
+      tool_call: {
+        name: 'check_book_availability',
+        arguments: { book_title: b.title },
+        status: 'executed'
+      },
       suggested_books: [
         {
           book_id: b.id,
           title: b.title,
           author: b.author || 'Tác giả',
-          reason: 'Khớp chính xác với từ khóa bạn vừa tìm kiếm.'
+          reason: `Còn sẵn ${avail} bản cho mượn tại thư viện.`
         }
       ],
-      intent: 'search_exact'
+      intent: 'check_book_availability'
     };
   }
 
@@ -137,97 +153,76 @@ Bạn có thể bấm vào thẻ sách bên dưới để xem chi tiết hoặc 
     answer: `Chào bạn nha! Cảm ơn câu hỏi của bạn. ✨
 
 Hiện tại trong kho thư viện SmartLib đang có **${books.length || 50} đầu sách**. Dưới đây là một số cuốn sách tiêu biểu bạn có thể tham khảo mượn đọc:`,
+    tool_call: null,
     suggested_books: randomBooks,
     intent: 'general'
   };
 };
 
 /**
- * Hàm gửi câu hỏi tới AI với schema đầu ra chuẩn hóa
+ * Hàm gửi câu hỏi tới AI qua Backend Application Orchestrator
+ * Tuân thủ Mô hình 2: Function Calling (Tool Calling)
  */
 export const askLibraryAI = async (userQuestion, books = []) => {
   const startTime = Date.now();
   const apiKey = getActiveApiKey();
   let aiResult = null;
 
-  // NẾU CÓ API KEY -> GỌI API THẬT
-  if (apiKey) {
-    try {
-      if (AI_CONFIG.PROVIDER === 'gemini') {
-        const catalogContext = (books || []).slice(0, 30).map(b => 
-          `ID: ${b.id} | "${b.title}" (${b.author || 'Khuyết danh'} - ${b.category || 'Chung'})`
-        ).join('\n');
-
-        const systemPrompt = `Bạn là Trợ lý AI Thông minh của Thư viện SmartLib.
-Nhiệm vụ: Trả lời độc giả bằng tiếng Việt thân thiện, lịch thiệp, hỗ trợ tra cứu sách và quy định thư viện.
-DANH MỤC SÁCH TRONG THƯ VIỆN:
-${catalogContext}
-
-YÊU CẦU ĐẶC BIỆT: Hãy trả về DUY NHẤT một JSON hợp lệ (không kèm markdown \`\`\`json) với schema sau:
-{
-  "found": true,
-  "answer": "Câu trả lời thân thiện định dạng markdown ngắn gọn",
-  "suggested_books": [
-    { "book_id": 1, "title": "Tên sách", "reason": "Lý do gợi ý sách này" }
-  ],
-  "intent": "recommendation"
-}`;
-
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${AI_CONFIG.MODEL}:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [
-                {
-                  role: 'user',
-                  parts: [{ text: `${systemPrompt}\n\nCâu hỏi của độc giả: ${userQuestion}` }]
-                }
-              ]
-            })
-          }
-        );
-
-        if (response.ok) {
-          const data = await response.json();
-          const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (candidateText) {
-            try {
-              const cleanJson = candidateText.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim();
-              const parsed = JSON.parse(cleanJson);
-              if (parsed.answer) {
-                aiResult = {
-                  found: parsed.found ?? true,
-                  answer: parsed.answer,
-                  suggested_books: Array.isArray(parsed.suggested_books) ? parsed.suggested_books : [],
-                  intent: parsed.intent || 'general'
-                };
-              }
-            } catch (e) {
-              aiResult = {
-                found: true,
-                answer: candidateText,
-                suggested_books: [],
-                intent: 'general'
-              };
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Lỗi khi gọi API AI, chuyển sang hệ thống tri thức tích hợp:', err);
+  // Lấy thông tin độc giả đang đăng nhập từ localStorage
+  let userObj = null;
+  try {
+    const storedUser = localStorage.getItem('currentUser');
+    if (storedUser) {
+      userObj = JSON.parse(storedUser);
     }
+  } catch (e) {
+    console.warn('Không đọc được currentUser:', e);
   }
 
-  // Fallback nếu không có API key hoặc lỗi mạng
+  const userId = userObj?.id || userObj?.UserID || null;
+  const userName = userObj?.fullName || userObj?.FullName || userObj?.username || null;
+
+  // 1. GỬI TỚI BACKEND APPLICATION FUNCTION CALLING ENDPOINT
+  try {
+    const response = await fetch('/api/ai/reader-chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: userQuestion,
+        userId: userId,
+        userName: userName,
+        role: 'Reader',
+        apiKey: apiKey || null,
+        provider: AI_CONFIG.PROVIDER || 'gemini'
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.success) {
+        aiResult = {
+          found: true,
+          answer: data.answer,
+          tool_call: data.tool_call,
+          suggested_books: Array.isArray(data.suggested_books) ? data.suggested_books : [],
+          intent: data.intent || 'general'
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Kết nối /api/ai/reader-chat không khả dụng, sử dụng Semantic Engine:', err);
+  }
+
+  // 2. NẾU BACKEND KHÔNG PHẢN HỒI -> FALLBACK ENGINE NỘI BỘ
   if (!aiResult) {
-    aiResult = generateLocalSmartResponse(userQuestion, books);
+    aiResult = generateLocalSmartResponse(userQuestion, books, userObj);
   }
 
-  // Đảm bảo nhịp chờ tự nhiên
+  // Đảm bảo nhịp tư duy mượt mà tự nhiên (~1.2 - 1.5s)
   const elapsed = Date.now() - startTime;
-  const targetDelay = AI_CONFIG.MIN_RESPONSE_DELAY_MS || 1200;
+  const targetDelay = 1200;
   const remainingDelay = Math.max(0, targetDelay - elapsed);
 
   if (remainingDelay > 0) {
