@@ -14,4 +14,4 @@ if __name__ == "__main__":
     print("SmartLib Python Backend dang khoi dong tren port 8000...")
     print("API Documentation: http://localhost:8000/docs")
     print("====================================================")
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)

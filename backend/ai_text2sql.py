@@ -1,10 +1,11 @@
 """
 Module: ai_text2sql.py
 Chức năng: Trợ lý truy vấn thông minh (Text-to-SQL Chatbot) cho Quản trị viên/Thủ thư.
-Bảo mật:
+Bảo mật & Kiểm soát Biên:
   - CHỈ CHO PHÉP CÂU LỆNH SELECT, CHẶN TUYỆT ĐỐI INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE.
   - CHẶN TRUY XUẤT CỘT DỮ LIỆU NHẠY CẢM (password, password_hash, api_key, jwt_secret).
-  - Hỗ trợ cả Google Gemini API và OpenAI API + Semantic Heuristic Fallback.
+  - Kiểm soát chặt chẽ các trường hợp biên: Rỗng, Quá ngắn/Ký tự đặc biệt (< 2 ký tự), Quá dài (> 500 ký tự), Câu hỏi ngoài phạm vi CSDL (Out-of-Scope), API Key không hợp lệ.
+  - Hỗ trợ cả Google Gemini API (gemini-2.0-flash / gemini-1.5-flash) và OpenAI API (gpt-4o-mini) + Semantic Heuristic Fallback.
 """
 
 import os
@@ -23,6 +24,9 @@ from database import db_manager
 from auth_dependency import verify_admin_role
 
 router = APIRouter(prefix="/api/ai", tags=["AI Text-to-SQL"], dependencies=[Depends(verify_admin_role)])
+
+MAX_TEXT2SQL_QUERY_LENGTH = 500
+MIN_TEXT2SQL_QUERY_LENGTH = 2
 
 # Schema CSDL chi tiết cung cấp cho LLM (Đã ẩn cột password_hash để bảo mật dữ liệu theo Tiêu chí 3.4)
 DATABASE_SCHEMA_PROMPT = """
@@ -64,6 +68,9 @@ Cơ sở dữ liệu thư viện SmartLib (MySQL/SQLite) bao gồm các bảng v
    - status: VARCHAR(50) ('Chờ duyệt', 'Đang mượn', 'Đã trả', 'Từ chối', 'Đã hủy')
    - renew_status: VARCHAR(50) ('Chờ duyệt gia hạn', 'Đã gia hạn', 'Từ chối gia hạn', NULL)
    - pending_renew_days: INT (Số ngày độc giả xin gia hạn thêm)
+   - is_flagged: BOOLEAN (1: giao dịch bất thường bị AI gắn cờ, 0: bình thường)
+   - anomaly_score: DECIMAL(5,2) (Điểm bất thường AI)
+   - anomaly_reason: VARCHAR(255) (Lý do gắn cờ bất thường)
 
 4. reservations (Đặt trước sách sắp có / hết sách):
    - id: INT PRIMARY KEY
@@ -86,7 +93,7 @@ Cơ sở dữ liệu thư viện SmartLib (MySQL/SQLite) bao gồm các bảng v
 
 # Các từ khóa nguy hiểm bị cấm tuyệt đối
 DISALLOWED_SQL_KEYWORDS = [
-    "DELETE", "UPDATE", "INSERT", "DROP", "ALTER", "TRUNCATE", "CREATE", 
+    "DELETE", "UPDATE", "INSERT", "DROP", "ALTER", "TRUNCATE", "CREATE",
     "REPLACE", "EXEC", "EXECUTE", "GRANT", "REVOKE", "ATTACH", "DETACH",
     "PRAGMA", "INFORMATION_SCHEMA", "INTO", "OUTFILE", "DUMPFILE"
 ]
@@ -100,6 +107,7 @@ SENSITIVE_DATA_KEYWORDS = [
 class AdminQueryRequest(BaseModel):
     query: Optional[str] = ""
     sql: Optional[str] = None
+    apiKey: Optional[str] = None
 
 
 class AdminQueryResponse(BaseModel):
@@ -125,7 +133,6 @@ def validate_sql(sql_query: str) -> bool:
             detail="Cảnh báo bảo mật: Câu lệnh chứa thao tác không được phép."
         )
 
-    # Loại bỏ comment SQL để tránh bypass qua comment (ví dụ /*! DELETE */, -- DROP)
     clean_sql = re.sub(r"--.*?$|/\*.*?\*/", "", sql_query, flags=re.MULTILINE | re.DOTALL).strip()
 
     # 1. Quét và CHẶN các từ khóa thay đổi/phá hủy CSDL: DROP, DELETE, UPDATE, INSERT, ALTER, TRUNCATE
@@ -160,20 +167,17 @@ def validate_read_only_sql(sql: str) -> bool:
     Xác thực câu lệnh SQL an toàn: CHỈ CHO PHÉP SELECT, không chứa lệnh ghi hay phân tách nhiều câu lệnh.
     """
     clean_sql = re.sub(r"--.*?$|/\*.*?\*/", "", sql, flags=re.MULTILINE | re.DOTALL).strip()
-    
+
     if not clean_sql:
         return False
-        
-    # Bắt buộc bắt đầu bằng SELECT hoặc WITH (CTE)
+
     if not re.match(r"^(SELECT|WITH)\s+", clean_sql, re.IGNORECASE):
         return False
 
-    # Chặn nhiều câu lệnh phân tách bằng dấu chấm phẩy (Stacked Queries SQL Injection)
     statements = [s.strip() for s in clean_sql.split(";") if s.strip()]
     if len(statements) > 1:
         return False
 
-    # Kiểm tra các từ khóa cấm và cột nhạy cảm
     upper_sql = f" {clean_sql.upper()} "
     for kw in DISALLOWED_SQL_KEYWORDS + SENSITIVE_DATA_KEYWORDS:
         pattern = rf"\b{kw}\b"
@@ -183,10 +187,33 @@ def validate_read_only_sql(sql: str) -> bool:
     return True
 
 
-def _translate_with_llm(user_prompt: str) -> Optional[dict]:
+def _validate_admin_api_key(explicit_key: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Kiểm tra tính hợp lệ của API Key (Gemini hoặc OpenAI) nếu được truyền vào"""
+    if explicit_key is not None and explicit_key.strip() != "":
+        k = explicit_key.strip()
+        if len(k) < 20 or not (k.startswith("AIza") or k.startswith("sk-")):
+            raise HTTPException(
+                status_code=401,
+                detail="API Key không hợp lệ! Vui lòng nhập đúng Google Gemini API Key ('AIza...') hoặc OpenAI API Key ('sk-...')."
+            )
+        if k.startswith("AIza"):
+            return k, None
+        return None, k
+
+    gemini_key = (os.getenv("GEMINI_API_KEY") or "").strip() or None
+    openai_key = (os.getenv("OPENAI_API_KEY") or "").strip() or None
+    require_key = os.getenv("AI_REQUIRE_API_KEY", "false").lower() in ("true", "1", "yes")
+    if require_key and not gemini_key and not openai_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Hệ thống yêu cầu cấu hình GEMINI_API_KEY hoặc OPENAI_API_KEY trong file .env để sử dụng Text-to-SQL AI."
+        )
+    return gemini_key, openai_key
+
+
+def _translate_with_llm(user_prompt: str, explicit_key: Optional[str] = None) -> Optional[dict]:
     """Gọi Google Gemini API hoặc OpenAI API để dịch câu hỏi tự nhiên sang SQL SELECT an toàn"""
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
+    gemini_key, openai_key = _validate_admin_api_key(explicit_key)
 
     if not gemini_key and not openai_key:
         return None
@@ -200,19 +227,24 @@ Quy tắc BẮT BUỘC:
 2. Tuyệt đối KHÔNG truy vấn cột password hoặc password_hash. Nếu người dùng hỏi về bảng users, luôn liệt kê rõ các cột an toàn: id, username, full_name, role, email, phone, is_active, is_locked.
 3. Bảng và Cột phải khớp 100% với Schema dưới đây:
 {DATABASE_SCHEMA_PROMPT}
-4. Kết quả trả về đúng định dạng JSON:
+4. NẾU câu hỏi của người dùng KHÔNG liên quan đến dữ liệu thư viện (ví dụ: hỏi thời tiết, bóng đá, giá vàng, toán học 1+1, nấu ăn, chuyện phím...), trả về JSON:
 {{
+   "out_of_scope": true,
+   "sql": "",
+   "explanation": "Câu hỏi nằm ngoài phạm vi truy vấn CSDL Thư viện SmartLib."
+}}
+5. Nếu câu hỏi hợp lệ, trả về JSON:
+{{
+   "out_of_scope": false,
    "sql": "SELECT ... LIMIT 100",
    "explanation": "Mô tả ngắn gọn kết quả này lấy những thông tin gì để trả lời câu hỏi"
 }}
-5. Luôn giới hạn tối đa 100 bản ghi (LIMIT 100) để đảm bảo tốc độ.
 6. Chỉ trả về JSON thuần, không bọc markdown.
 """
 
-    # Ưu tiên 1: Google Gemini API nếu có GEMINI_API_KEY
     if gemini_key:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
             payload = {
                 "contents": [
                     {
@@ -236,10 +268,16 @@ Quy tắc BẮT BUỘC:
                 content = re.sub(r"^```json\s*", "", content)
                 content = re.sub(r"\s*```$", "", content)
                 return json.loads(content)
+        except urllib.error.HTTPError as http_err:
+            if http_err.code in (400, 401, 403) and explicit_key:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Google Gemini API Key không hợp lệ hoặc đã hết hạn!"
+                )
+            print(f"[Text-to-SQL] Gemini translation failed: {http_err}")
         except Exception as e:
             print(f"[Text-to-SQL] Gemini translation failed: {e}")
 
-    # Ưu tiên 2: OpenAI API nếu có OPENAI_API_KEY
     if openai_key:
         try:
             payload = {
@@ -267,6 +305,13 @@ Quy tắc BẮT BUỘC:
                 content = re.sub(r"^```json\s*", "", content)
                 content = re.sub(r"\s*```$", "", content)
                 return json.loads(content)
+        except urllib.error.HTTPError as http_err:
+            if http_err.code in (401, 403) and explicit_key:
+                raise HTTPException(
+                    status_code=401,
+                    detail="OpenAI API Key không hợp lệ hoặc đã hết hạn!"
+                )
+            print(f"[Text-to-SQL] OpenAI translation failed: {http_err}")
         except Exception as e:
             print(f"[Text-to-SQL] OpenAI translation failed: {e}")
 
@@ -275,8 +320,9 @@ Quy tắc BẮT BUỘC:
 
 def _translate_heuristic(prompt: str) -> dict:
     """
-    Bộ phân tích ngữ nghĩa tự nhiên (Semantic Heuristic NLP) cho các câu hỏi phổ biến của thủ thư.
-    Đảm bảo chatbot luôn hoạt động xuất sắc ngay cả khi chưa cấu hình API Key.
+    Bộ phân tích ngữ nghĩa tự nhiên (Semantic Heuristic NLP) cho các câu hỏi quản trị thư viện.
+    Kiểm soát chặt chẽ câu hỏi ngoài phạm vi (Out-of-Scope): Nếu câu hỏi không liên quan đến
+    nghiệp vụ CSDL Thư viện, trả về out_of_scope = True để từ chối thay vì trả về 50 sách ngẫu nhiên!
     """
     p = prompt.lower().strip()
 
@@ -296,7 +342,23 @@ def _translate_heuristic(prompt: str) -> dict:
             "explanation": "Truy vấn danh sách các phiếu mượn sách đã quá hạn trả, kèm thông tin độc giả và số tiền phạt tích lũy."
         }
 
-    # 2. Sách còn sẵn trong kho
+    # 2. Giao dịch bất thường / AI Anomaly
+    if any(k in p for k in ["bất thường", "anomaly", "gắn cờ", "nghi vấn", "gian lận"]):
+        return {
+            "sql": (
+                "SELECT br.id AS ma_phieu, u.full_name AS doc_gia, b.title AS ten_sach, "
+                "br.borrow_date AS ngay_muon, br.actual_return_date AS ngay_tra, "
+                "br.anomaly_score AS diem_bat_thuong, br.anomaly_reason AS ly_do_canh_bao "
+                "FROM borrow_records br "
+                "JOIN books b ON br.book_id = b.id "
+                "JOIN users u ON br.user_id = u.id "
+                "WHERE br.is_flagged = 1 "
+                "ORDER BY br.anomaly_score DESC LIMIT 100"
+            ),
+            "explanation": "Danh sách các giao dịch mượn - trả có dấu hiệu bất thường bị hệ thống AI gắn cờ cảnh báo."
+        }
+
+    # 3. Sách còn sẵn trong kho
     if any(k in p for k in ["còn sẵn", "sẵn sàng", "còn trong kho", "sách còn"]):
         return {
             "sql": (
@@ -308,8 +370,8 @@ def _translate_heuristic(prompt: str) -> dict:
             "explanation": "Danh sách các đầu sách hiện đang có sẵn trong kho để bạn đọc mượn ngay."
         }
 
-    # 3. Sách hết / hết hàng
-    if any(k in p for k in ["hết sách", "hết hàng", "không còn sẵn"]):
+    # 4. Sách hết / hết hàng
+    if any(k in p for k in ["hết sách", "hết hàng", "không còn sẵn", "tồn kho bằng 0"]):
         return {
             "sql": (
                 "SELECT id, title AS ten_sach, author AS tac_gia, category AS the_loai, "
@@ -319,8 +381,8 @@ def _translate_heuristic(prompt: str) -> dict:
             "explanation": "Danh sách các đầu sách đã được mượn hết (số lượng khả dụng bằng 0)."
         }
 
-    # 4. Top sách mượn nhiều nhất
-    if any(k in p for k in ["nhiều nhất", "phổ biến", "top sách", "thịnh hành", "hot"]):
+    # 5. Top sách mượn nhiều nhất
+    if any(k in p for k in ["nhiều nhất", "phổ biến", "top", "thịnh hành", "hot"]):
         return {
             "sql": (
                 "SELECT b.id, b.title AS ten_sach, b.author AS tac_gia, b.category AS the_loai, "
@@ -333,7 +395,7 @@ def _translate_heuristic(prompt: str) -> dict:
             "explanation": "Top 10 cuốn sách được độc giả mượn đọc nhiều nhất trong thư viện."
         }
 
-    # 5. Độc giả bị khóa tài khoản
+    # 6. Độc giả bị khóa tài khoản
     if any(k in p for k in ["bị khóa", "khóa tài khoản", "tài khoản bị khóa", "chặn"]):
         return {
             "sql": (
@@ -344,7 +406,18 @@ def _translate_heuristic(prompt: str) -> dict:
             "explanation": "Danh sách các tài khoản độc giả hiện đang bị tạm khóa kèm lý do."
         }
 
-    # 6. Yêu cầu xin gia hạn chờ duyệt
+    # 7. Danh sách độc giả / người dùng
+    if any(k in p for k in ["độc giả", "người dùng", "sinh viên", "bạn đọc", "thành viên"]):
+        return {
+            "sql": (
+                "SELECT id, username, full_name AS ho_ten, role AS vai_tro, email, phone AS so_dien_thoai, "
+                "address AS dia_chi, is_locked AS bi_khoa "
+                "FROM users WHERE role = 'Reader' ORDER BY id DESC LIMIT 100"
+            ),
+            "explanation": "Danh sách hồ sơ độc giả đã đăng ký trong hệ thống Thư viện SmartLib."
+        }
+
+    # 8. Yêu cầu xin gia hạn chờ duyệt
     if any(k in p for k in ["gia hạn", "chờ duyệt gia hạn", "xin gia hạn"]):
         return {
             "sql": (
@@ -359,7 +432,7 @@ def _translate_heuristic(prompt: str) -> dict:
             "explanation": "Danh sách các đơn yêu cầu xin gia hạn mượn sách đang chờ thủ thư phê duyệt."
         }
 
-    # 7. Phiếu mượn chờ duyệt
+    # 9. Phiếu mượn chờ duyệt
     if any(k in p for k in ["chờ duyệt", "chờ duyệt mượn", "phiếu mượn mới"]):
         return {
             "sql": (
@@ -374,7 +447,7 @@ def _translate_heuristic(prompt: str) -> dict:
             "explanation": "Các phiếu đăng ký mượn sách mới đang đợi thủ thư kiểm tra và duyệt."
         }
 
-    # 8. Tiền phạt / Chưa nộp phạt
+    # 10. Tiền phạt / Chưa nộp phạt
     if any(k in p for k in ["tiền phạt", "chưa nộp", "nộp phạt", "phạt"]):
         return {
             "sql": (
@@ -390,7 +463,7 @@ def _translate_heuristic(prompt: str) -> dict:
             "explanation": "Danh sách các khoản tiền phạt trễ hạn chưa được nộp của độc giả."
         }
 
-    # 9. Danh sách đặt trước sách
+    # 11. Danh sách đặt trước sách
     if any(k in p for k in ["đặt trước", "giữ chỗ", "chờ sách", "reservation"]):
         return {
             "sql": (
@@ -405,7 +478,7 @@ def _translate_heuristic(prompt: str) -> dict:
             "explanation": "Danh sách bạn đọc đang đăng ký đặt trước sách sắp có hoặc đang chờ nhận sách."
         }
 
-    # 10. Tìm kiếm theo thể loại hoặc từ khóa chung
+    # 12. Tìm kiếm theo thể loại
     category_match = None
     for cat in ["công nghệ", "kinh tế", "văn học", "kỹ năng", "khoa học", "lịch sử"]:
         if cat in p:
@@ -418,10 +491,32 @@ def _translate_heuristic(prompt: str) -> dict:
             "explanation": f"Danh sách các đầu sách thuộc thể loại '{category_match}' trong thư viện."
         }
 
-    # Mặc định: Hiển thị tổng quan các sách trong thư viện
+    # 13. Hỏi về phiếu mượn / lịch sử mượn trả nói chung
+    if any(k in p for k in ["phiếu mượn", "lịch sử mượn", "đang mượn", "đã trả", "lượt mượn"]):
+        return {
+            "sql": (
+                "SELECT br.id AS ma_phieu, b.title AS ten_sach, u.full_name AS doc_gia, "
+                "br.borrow_date AS ngay_muon, br.due_date AS han_tra, br.status AS trang_thai "
+                "FROM borrow_records br "
+                "JOIN books b ON br.book_id = b.id "
+                "JOIN users u ON br.user_id = u.id "
+                "ORDER BY br.id DESC LIMIT 50"
+            ),
+            "explanation": "Danh sách 50 phiếu mượn - trả sách gần nhất trong hệ thống."
+        }
+
+    # 14. Hỏi về danh sách sách / kho sách / thống kê sách
+    if any(k in p for k in ["sách", "kho", "tác giả", "thể loại", "ấn phẩm", "tổng số", "thống kê"]):
+        return {
+            "sql": "SELECT id, title AS ten_sach, author AS tac_gia, category AS the_loai, available_copies AS con_san, quantity AS tong_so, status AS trang_thai FROM books ORDER BY id DESC LIMIT 50",
+            "explanation": "Hiển thị danh sách tổng quan 50 đầu sách mới nhất trong kho thư viện."
+        }
+
+    # 15. CÂU HỎI NGOÀI PHẠM VI CSDL THƯ VIỆN (OUT-OF-SCOPE GUARDRAIL)
     return {
-        "sql": "SELECT id, title AS ten_sach, author AS tac_gia, category AS the_loai, available_copies AS con_san, quantity AS tong_so, status AS trang_thai FROM books ORDER BY id DESC LIMIT 50",
-        "explanation": "Hiển thị danh sách tổng quan 50 đầu sách mới nhất trong kho thư viện."
+        "out_of_scope": True,
+        "sql": "",
+        "explanation": "Câu hỏi nằm ngoài phạm vi truy vấn CSDL Thư viện SmartLib."
     }
 
 
@@ -431,7 +526,6 @@ def _execute_safe_query(sql_query: str) -> tuple[List[str], List[Dict[str, Any]]
     Đồng thời lọc bỏ các cột nhạy cảm (password, password_hash) nếu người dùng gọi SELECT * FROM users.
     """
     engine = None
-    # Ưu tiên MySQL nếu đang kết nối
     if db_manager.mysql_mgr.is_connected() and db_manager.mysql_mgr.engine:
         engine = db_manager.mysql_mgr.engine
     else:
@@ -455,7 +549,6 @@ def _execute_safe_query(sql_query: str) -> tuple[List[str], List[Dict[str, Any]]
                 if col_name.lower() in hidden_cols:
                     continue
                 val = row[col_idx]
-                # Chuẩn hóa các kiểu dữ liệu cho JSON serialization
                 if isinstance(val, (datetime, date)):
                     row_dict[col_name] = val.isoformat()
                 elif isinstance(val, Decimal):
@@ -472,17 +565,32 @@ def _execute_safe_query(sql_query: str) -> tuple[List[str], List[Dict[str, Any]]
 @router.post("/admin-query", response_model=AdminQueryResponse)
 async def handle_admin_query(req: AdminQueryRequest):
     """
-    Endpoint Text-to-SQL: Tiếp nhận câu hỏi tiếng Việt -> Sinh SQL SELECT -> Chặn lệnh nguy hiểm & cột mật khẩu -> Trả kết quả JSON
+    Endpoint Text-to-SQL: Tiếp nhận câu hỏi tiếng Việt -> Kiểm soát biên & câu hỏi ngoài -> Sinh SQL SELECT -> Chặn lệnh nguy hiểm & cột mật khẩu -> Trả kết quả JSON
     """
     user_prompt = (req.query or "").strip()
     direct_sql = (req.sql or "").strip()
 
+    # 1. Kiểm soát biên rỗng
     if not user_prompt and not direct_sql:
-        raise HTTPException(status_code=400, detail="Vui lòng nhập câu hỏi truy vấn.")
+        raise HTTPException(status_code=400, detail="Vui lòng nhập câu hỏi truy vấn (không được để trống).")
 
-    # Kiểm tra ngay trên câu hỏi tự nhiên nếu người dùng cố tình hỏi mật khẩu hoặc truyền SQL nguy hiểm
+    # 2. Kiểm soát biên độ dài tối đa (> 500 ký tự) và biên độ dài tối thiểu (< 2 ký tự / chỉ ký tự đặc biệt)
+    if user_prompt:
+        if len(user_prompt) > MAX_TEXT2SQL_QUERY_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Câu hỏi truy vấn vượt quá giới hạn biên tối đa {MAX_TEXT2SQL_QUERY_LENGTH} ký tự (hiện tại: {len(user_prompt)} ký tự)."
+            )
+        alnum_chars = re.findall(r"[a-zA-Z0-9À-ỹ]", user_prompt)
+        if len(user_prompt) < MIN_TEXT2SQL_QUERY_LENGTH or len(alnum_chars) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Câu hỏi truy vấn không hợp lệ (quá ngắn hoặc chỉ chứa ký tự đặc biệt). Vui lòng nhập câu hỏi rõ ràng bằng tiếng Việt."
+            )
+
+    # 3. Kiểm tra ngay trên câu hỏi tự nhiên nếu người dùng cố tình hỏi mật khẩu hoặc truyền SQL nguy hiểm
     clean_prompt = re.sub(r"--.*?$|/\*.*?\*/", "", user_prompt, flags=re.MULTILINE | re.DOTALL).strip()
-    if re.search(r"\b(password_hash|password|mật\s*khẩu)\b", clean_prompt, flags=re.IGNORECASE):
+    if re.search(r"\b(password_hash|password|mật\s*khẩu|jwt_secret)\b", clean_prompt, flags=re.IGNORECASE):
         raise HTTPException(
             status_code=403,
             detail="Cảnh báo bảo mật: Không được phép truy xuất trường dữ liệu nhạy cảm (mật khẩu / khóa bảo mật)."
@@ -492,35 +600,38 @@ async def handle_admin_query(req: AdminQueryRequest):
         sql = direct_sql
         explanation = "Thực thi truy vấn SQL được cung cấp."
     else:
-        # 1. Thử dịch bằng LLM (Gemini / OpenAI API nếu có)
-        translated = _translate_with_llm(user_prompt)
-
-        # 2. Fallback: Nếu không có LLM
-        if not translated or not translated.get("sql"):
-            # Nếu user_prompt truyền vào thẳng một câu lệnh SQL chứa từ khóa cấm
-            if re.search(r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|EXEC|EXECUTE|INTO\s+OUTFILE)\b", clean_prompt, flags=re.IGNORECASE):
-                sql = user_prompt
-                explanation = "Yêu cầu thực thi câu lệnh SQL."
-            else:
-                translated = _translate_heuristic(user_prompt)
-                sql = translated.get("sql", "").strip()
-                explanation = translated.get("explanation", "Truy vấn dữ liệu theo yêu cầu.")
+        # 4. Nếu user_prompt truyền vào thẳng một câu lệnh SQL chứa từ khóa cấm -> chuyển thẳng tới validate_sql để chặn 403
+        if re.search(r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|EXEC|EXECUTE|INTO\s+OUTFILE)\b", clean_prompt, flags=re.IGNORECASE):
+            sql = user_prompt
+            explanation = "Yêu cầu thực thi câu lệnh SQL."
         else:
-            sql = translated.get("sql", "").strip()
+            # 5. Thử dịch bằng LLM (Gemini / OpenAI API nếu có)
+            translated = _translate_with_llm(user_prompt, req.apiKey)
+
+            # 6. Fallback sang Semantic Heuristic nếu chưa cấu hình LLM API Key
+            if not translated:
+                translated = _translate_heuristic(user_prompt)
+
+            if translated.get("out_of_scope"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Câu hỏi nằm ngoài phạm vi truy vấn CSDL Thư viện SmartLib. Trợ lý Text-to-SQL chỉ hỗ trợ truy vấn dữ liệu Sách, Độc giả, Phiếu mượn - trả, Đặt trước và Tiền phạt."
+                )
+
+            sql = (translated.get("sql") or "").strip()
             explanation = translated.get("explanation", "Truy vấn dữ liệu theo yêu cầu.")
 
-    # 3. QUÉT VÀ CHẶN TỪ KHÓA NGUY HIỂM & CỘT NHẠY CẢM BẰNG REGEX (validate_sql)
-    # Dừng việc thực thi ngay lập tức và trả về HTTP Status 403 nếu phát hiện vi phạm
+    # 7. QUÉT VÀ CHẶN TỪ KHÓA NGUY HIỂM & CỘT NHẠY CẢM BẰNG REGEX (validate_sql)
     validate_sql(sql)
 
-    # 4. Kiểm tra bổ sung đảm bảo chỉ là câu lệnh SELECT đơn lẻ an toàn
+    # 8. Kiểm tra bổ sung đảm bảo chỉ là câu lệnh SELECT đơn lẻ an toàn
     if not validate_read_only_sql(sql):
         raise HTTPException(
             status_code=403,
             detail="Cảnh báo bảo mật: Câu lệnh chứa thao tác không được phép."
         )
 
-    # 5. Thực thi truy vấn
+    # 9. Thực thi truy vấn
     try:
         columns, data = _execute_safe_query(sql)
         return AdminQueryResponse(

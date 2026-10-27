@@ -185,7 +185,9 @@ def login(req: LoginRequest):
         "address": user.get("address", ""),
         "birthDate": user.get("birthDate")
     }
-    return {"message": "Đăng nhập thành công!", "user": user_data}
+    from auth_dependency import create_jwt_token
+    token = create_jwt_token({"sub": str(user.get("id", 1)), "username": user.get("username", ""), "role": user.get("role", "Reader")})
+    return {"message": "Đăng nhập thành công!", "user": user_data, "token": token}
 
 
 @app.post("/api/auth/register", status_code=201)
@@ -326,7 +328,11 @@ def create_book(req: BookCreate):
     if not req.title.strip():
         raise HTTPException(status_code=400, detail="Vui lòng nhập tên sách hợp lệ.")
     if not is_upcoming and req.quantity < 1:
-        raise HTTPException(status_code=400, detail="Vui lòng nhập số lượng hợp lệ.")
+        raise HTTPException(status_code=400, detail="Vui lòng nhập số lượng hợp lệ (tối thiểu 1 cuốn).")
+    if len(req.title.strip()) > 255:
+        raise HTTPException(status_code=400, detail="Tên sách vượt quá giới hạn biên tối đa 255 ký tự.")
+    if req.quantity > 10000:
+        raise HTTPException(status_code=400, detail="Số lượng sách nhập kho vượt quá giới hạn biên tối đa 10.000 cuốn.")
 
     db = db_manager.load_db()
     books = db.get("books", [])
@@ -1017,7 +1023,9 @@ def request_renew_borrow_record(record_id: int, req: BorrowRenewRequest):
     if current_renew_count >= 2:
         raise HTTPException(status_code=400, detail="Cuốn sách này đã được gia hạn tối đa (2 lần), không thể xin gia hạn thêm.")
 
-    days = max(1, min(60, int(req.days or 7)))
+    if req.days is not None and (int(req.days) < 1 or int(req.days) > 20):
+        raise HTTPException(status_code=400, detail="Số ngày xin gia hạn phải nằm trong khoảng biên từ 1 đến 20 ngày.")
+    days = int(req.days or 7)
     record["renewStatus"] = "Chờ duyệt gia hạn"
     record["pendingRenewDays"] = days
     record["pendingRenewNotes"] = req.notes or ""
@@ -1171,7 +1179,9 @@ def renew_borrow_record(record_id: int, req: BorrowRenewRequest):
     if record.get("status") != "Đang mượn":
         raise HTTPException(status_code=400, detail="Chỉ có thể gia hạn cho sách đang trong trạng thái Đang mượn.")
 
-    days = max(1, min(60, int(req.days or 7)))
+    if req.days is not None and (int(req.days) < 1 or int(req.days) > 20):
+        raise HTTPException(status_code=400, detail="Số ngày xin gia hạn phải nằm trong khoảng biên từ 1 đến 20 ngày.")
+    days = int(req.days or 7)
     old_return_str = record.get("returnDate") or record.get("dueDate")
     try:
         if old_return_str:
