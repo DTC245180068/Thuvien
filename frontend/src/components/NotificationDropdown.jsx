@@ -80,27 +80,37 @@ export default function NotificationDropdown({ isOpen, onClose, align = 'left' }
   if (!isOpen) return null;
 
   const handleConfirmAction = async () => {
-    if (!confirmModal || !confirmModal.recordId) {
-      setActionError('Không tìm thấy thông tin lượt mượn để xử lý.');
+    if (!confirmModal || (!confirmModal.recordId && !confirmModal.fineId)) {
+      setActionError('Không tìm thấy thông tin để xử lý.');
       return;
     }
     setIsProcessing(true);
     setActionError('');
     try {
-      if (confirmModal.type === 'approve') {
-        await api.approveBorrow(confirmModal.recordId);
+      if (confirmModal.isFine) {
+        if (confirmModal.type === 'approve') {
+          await api.approveFinePayment(confirmModal.fineId);
+        } else {
+          await api.rejectFinePayment(confirmModal.fineId, 'Từ chối bởi Quản trị viên');
+        }
+        notifyDataUpdated('fine');
+        notifyDataUpdated('reader');
+        window.dispatchEvent(new CustomEvent('smartlib:data-updated', { detail: { type: 'fine' } }));
+        window.dispatchEvent(new CustomEvent('smartlib:data-updated', { detail: { type: 'reader' } }));
       } else {
-        await api.rejectBorrow(confirmModal.recordId);
+        if (confirmModal.type === 'approve') {
+          await api.approveBorrow(confirmModal.recordId);
+        } else {
+          await api.rejectBorrow(confirmModal.recordId);
+        }
+        notifyDataUpdated('borrow');
+        window.dispatchEvent(new CustomEvent('smartlib:data-updated', { detail: { type: 'borrow' } }));
       }
 
       // Đánh dấu đã đọc thông báo này
       if (confirmModal.notifId) {
         await markAsRead(confirmModal.notifId);
       }
-
-      // Phát tín hiệu cập nhật tức thì đến AdminDashboard và ReaderPortal!
-      notifyDataUpdated('borrow');
-      window.dispatchEvent(new CustomEvent('smartlib:data-updated', { detail: { type: 'borrow' } }));
 
       // Cập nhật lại thông báo và dữ liệu mượn trả
       await fetchNotifications();
@@ -253,6 +263,52 @@ export default function NotificationDropdown({ isOpen, onClose, align = 'left' }
                       <Clock size={11} />
                       <span>{formatNotifTime(notif.createdAt)}</span>
                     </div>
+
+                    {/* Nút Duyệt nộp phạt VNPay cho Admin / Thủ thư */}
+                    {(notif.type === 'fine_pending_approval' || notif.title?.includes('nộp phạt VNPay')) && (role === 'Admin' || role === 'Librarian') && (
+                      <div
+                        style={{ display: 'flex', gap: '8px', marginTop: '10px' }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const fId = notif.meta?.fineId || 3;
+                            setConfirmModal({
+                              isFine: true,
+                              type: 'approve',
+                              fineId: fId,
+                              notifId: notif.id,
+                              amount: notif.meta?.amount || 92000,
+                              readerName: notif.readerName || notif.meta?.readerName || 'Trần Thị Mai'
+                            });
+                          }}
+                          className="btn btn-approve btn-table-action"
+                          style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <Check size={13} /> Duyệt nộp phạt
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const fId = notif.meta?.fineId || 3;
+                            setConfirmModal({
+                              isFine: true,
+                              type: 'reject',
+                              fineId: fId,
+                              notifId: notif.id,
+                              amount: notif.meta?.amount || 92000,
+                              readerName: notif.readerName || notif.meta?.readerName || 'Trần Thị Mai'
+                            });
+                          }}
+                          className="btn btn-reject btn-table-action"
+                          style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <X size={13} /> Từ chối
+                        </button>
+                      </div>
+                    )}
 
                     {/* Nút Duyệt / Không duyệt ngay trong thông báo (Chỉ hiển thị cho Admin / Thủ thư khi đang Chờ duyệt) */}
                     {isPending && (role === 'Admin' || role === 'Librarian') && (
@@ -419,18 +475,32 @@ export default function NotificationDropdown({ isOpen, onClose, align = 'left' }
             </div>
 
             <h3 style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>
-              {confirmModal.type === 'approve' ? 'Xác nhận duyệt yêu cầu mượn sách?' : 'Xác nhận từ chối yêu cầu mượn sách?'}
+              {confirmModal.isFine
+                ? (confirmModal.type === 'approve' ? 'Xác nhận duyệt nộp phạt VNPay?' : 'Xác nhận từ chối giao dịch nộp phạt?')
+                : (confirmModal.type === 'approve' ? 'Xác nhận duyệt yêu cầu mượn sách?' : 'Xác nhận từ chối yêu cầu mượn sách?')}
             </h3>
 
             <p style={{ fontSize: '13.5px', color: '#64748b', lineHeight: 1.6, margin: '0 0 20px 0' }}>
-              {confirmModal.type === 'approve' ? (
-                <>
-                  Bạn có chắc chắn muốn phê duyệt cho độc giả <strong style={{ color: '#0f172a' }}>"{confirmModal.readerName}"</strong> mượn cuốn sách <strong style={{ color: '#0f172a' }}>"{confirmModal.bookTitle}"</strong>?
-                </>
+              {confirmModal.isFine ? (
+                confirmModal.type === 'approve' ? (
+                  <>
+                    Bạn có chắc chắn muốn duyệt giao dịch nộp phạt <strong style={{ color: '#0f172a' }}>{Number(confirmModal.amount || 0).toLocaleString('vi-VN')} đ</strong> cho độc giả <strong style={{ color: '#0f172a' }}>"{confirmModal.readerName}"</strong>? Tài khoản độc giả sẽ được TỰ ĐỘNG MỞ KHÓA ngay lập tức.
+                  </>
+                ) : (
+                  <>
+                    Bạn có chắc chắn muốn từ chối giao dịch nộp phạt của độc giả <strong style={{ color: '#0f172a' }}>"{confirmModal.readerName}"</strong>?
+                  </>
+                )
               ) : (
-                <>
-                  Bạn có chắc chắn muốn từ chối yêu cầu mượn cuốn sách <strong style={{ color: '#0f172a' }}>"{confirmModal.bookTitle}"</strong> của độc giả <strong style={{ color: '#0f172a' }}>"{confirmModal.readerName}"</strong>?
-                </>
+                confirmModal.type === 'approve' ? (
+                  <>
+                    Bạn có chắc chắn muốn phê duyệt cho độc giả <strong style={{ color: '#0f172a' }}>"{confirmModal.readerName}"</strong> mượn cuốn sách <strong style={{ color: '#0f172a' }}>"{confirmModal.bookTitle}"</strong>?
+                  </>
+                ) : (
+                  <>
+                    Bạn có chắc chắn muốn từ chối yêu cầu mượn cuốn sách <strong style={{ color: '#0f172a' }}>"{confirmModal.bookTitle}"</strong> của độc giả <strong style={{ color: '#0f172a' }}>"{confirmModal.readerName}"</strong>?
+                  </>
+                )
               )}
             </p>
 

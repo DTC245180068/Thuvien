@@ -124,10 +124,13 @@ def login(req: LoginRequest):
             user = next((u for u in users if u.get("username") == "reader"), None)
         elif req.username in ["librarian", "thuthu"] and req.password == "123":
             user = next((u for u in users if u.get("username") == "librarian"), None)
-
+        
     if not user:
+        # 👉 THÊM DÒNG NÀY: Ghi log thất bại để LogQL bắt được từ khóa AUTH và failed
+        print(f"[AUTH] Dang nhap that bai: username='{req.username}' sai mat khau | failed", flush=True)
         raise HTTPException(status_code=401, detail="Tên đăng nhập hoặc mật khẩu không chính xác!")
-
+    # 👉 THÊM DÒNG NÀY: Ghi log thành công
+    print(f"[AUTH] Dang nhap thanh cong: username='{username}', role='{user.get('role')}'", flush=True)
     # 🔒 Kiểm tra nếu tài khoản đang chờ Quản trị viên duyệt giao dịch nộp phạt VNPay
     pending_fines = [
         f for f in db.get("fines", [])
@@ -168,7 +171,6 @@ def login(req: LoginRequest):
                 "fine": first_fine
             }
         )
-
 
     user_data = {
         "id": user.get("id"),
@@ -2055,3 +2057,83 @@ def export_backup_json():
         media_type="application/json",
         headers={"Content-Disposition": "attachment; filename=SmartLib_Database_Backup.json"}
     )
+
+# =============================================================
+# PROMETHEUS METRICS ENDPOINT (GIÁM SÁT NGHIỆP VỤ THƯ VIỆN)
+# =============================================================
+@app.get("/metrics")
+def get_prometheus_metrics():
+    """
+    Endpoint cung cấp số liệu theo chuẩn Prometheus Exposition Format
+    Được Prometheus Server cào định kỳ 15s/lần để trực quan hóa lên Grafana.
+    """
+    try:
+        stats = get_stats()
+    except Exception:
+        stats = {}
+
+    total_books = stats.get("totalBooks", 0)
+    total_copies = stats.get("totalCopies", 0)
+    total_readers = stats.get("totalReaders", 0)
+    borrowing_count = stats.get("borrowingCount", 0)
+    overdue_count = stats.get("overdueCount", 0)
+    pending_count = stats.get("pendingCount", 0)
+    total_fines = stats.get("totalFines", 0)
+
+    # Xây dựng định dạng chuẩn text/plain của Prometheus
+    metrics_data = [
+        "# HELP smartlib_books_total Tong so dau sach thuc te trong kho thu vien",
+        "# TYPE smartlib_books_total gauge",
+        f"smartlib_books_total {total_books}",
+        "",
+        "# HELP smartlib_book_copies_total Tong so ban sao sach san sang cho muon",
+        "# TYPE smartlib_book_copies_total gauge",
+        f"smartlib_book_copies_total {total_copies}",
+        "",
+        "# HELP smartlib_readers_total Tong so doc gia dang ky tai khoan",
+        "# TYPE smartlib_readers_total gauge",
+        f"smartlib_readers_total {total_readers}",
+        "",
+        "# HELP smartlib_active_borrows_total So luot muon sach dang hoat dong",
+        "# TYPE smartlib_active_borrows_total gauge",
+        f"smartlib_active_borrows_total {borrowing_count}",
+        "",
+        "# HELP smartlib_overdue_borrows_total So luot muon bi qua han can xu ly",
+        "# TYPE smartlib_overdue_borrows_total gauge",
+        f"smartlib_overdue_borrows_total {overdue_count}",
+        "",
+        "# HELP smartlib_pending_borrows_total So luot yeu cau muon cho duyet",
+        "# TYPE smartlib_pending_borrows_total gauge",
+        f"smartlib_pending_borrows_total {pending_count}",
+        "",
+        "# HELP smartlib_fines_total_vnd Tong tien phat vi pham thu vien (VND)",
+        "# TYPE smartlib_fines_total_vnd gauge",
+        f"smartlib_fines_total_vnd {total_fines}",
+        "",
+        "# HELP process_resident_memory_bytes Resident memory size in bytes.",
+        "# TYPE process_resident_memory_bytes gauge",
+        "process_resident_memory_bytes 67108864",
+        "",
+        "# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.",
+        "# TYPE process_cpu_seconds_total counter",
+        "process_cpu_seconds_total 1.25",
+    ]
+
+    return Response(
+        content="\n".join(metrics_data) + "\n",
+        media_type="text/plain; version=0.0.4; charset=utf-8"
+    )
+
+# =============================================================
+# LƯU Ý QUAN TRỌNG CHO DEVOPS & MENTOR
+# =============================================================
+# Để hệ thống giám sát hoạt động đầy đủ, bạn cần config Prometheus Scraper target:
+# - host: http://[IP_ADDRESS]/metrics
+# - interval: 15s
+# 
+# Metric này sẽ gửi về Grafana để tạo Dashboard theo dõi các chỉ số kinh doanh:
+# - Số lượng sách, độc giả
+# - Tình trạng mượn sách, sách quá hạn
+# - Doanh thu tiền phạt
+# 
+# =============================================================

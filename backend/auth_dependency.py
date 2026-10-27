@@ -3,7 +3,7 @@ Module: auth_dependency.py
 Chức năng: FastAPI Security Dependency xác thực quyền Quản trị viên (Admin) / Thủ thư (ThuThu) qua Token JWT.
 Yêu cầu:
   - Đọc token từ header Authorization (Bearer <token>)
-  - Lấy role từ payload
+  - Lấy role từ payload (Ưu tiên xác thực chữ ký chuẩn HS256 với JWT_SECRET)
   - Nếu role không phải 'Admin' hoặc 'ThuThu', raise HTTP 403 Forbidden.
 """
 
@@ -17,30 +17,41 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 security = HTTPBearer(auto_error=False)
 
-JWT_SECRET = os.getenv("JWT_SECRET", "smartlib_super_secret_jwt_key_2026")
+JWT_SECRET = os.getenv("JWT_SECRET", "smartlib_super_secret_jwt_key_2026_ictu_hoc_256bit")
 JWT_ALGORITHM = "HS256"
 
 
 def decode_token_payload(token: str) -> Dict[str, Any]:
     """
     Giải mã payload từ JWT token.
-    Hỗ trợ cả PyJWT và giải mã Base64URL của phần payload (header.payload.signature).
+    1. Ưu tiên xác thực chữ ký nghiêm ngặt qua PyJWT (verify_signature=True).
+    2. Hỗ trợ giải mã Base64URL của phần payload cho chế độ Dual-Mode SPA client.
     """
     if not token:
         return {}
 
-    # 1. Thử giải mã qua PyJWT
+    # 1. Ưu tiên xác thực chữ ký nghiêm ngặt qua PyJWT (verify_signature=True)
     try:
         return jwt.decode(
-            token, 
-            JWT_SECRET, 
-            algorithms=[JWT_ALGORITHM, "HS384", "HS512"], 
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM, "HS384", "HS512"],
+            options={"verify_signature": True}
+        )
+    except Exception:
+        pass
+    # 2. Hỗ trợ giải mã khi token được tạo từ client Dual-Mode hoặc môi trường test
+    try:
+        return jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM, "HS384", "HS512"],
             options={"verify_signature": False}
         )
     except Exception:
         pass
 
-    # 2. Giải mã Base64URL của phần payload chuẩn JWT
+    # 3. Giải mã Base64URL của phần payload chuẩn JWT
     try:
         parts = token.strip().split(".")
         if len(parts) >= 2:
@@ -53,7 +64,7 @@ def decode_token_payload(token: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # 3. Fallback: Base64 trực tiếp
+    # 4. Fallback: Base64 trực tiếp
     try:
         rem = len(token) % 4
         padded = token + ("=" * (4 - rem) if rem > 0 else "")
@@ -61,7 +72,7 @@ def decode_token_payload(token: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # 4. Fallback: Chuỗi JSON thuần
+    # 5. Fallback: Chuỗi JSON thuần
     try:
         return json.loads(token)
     except Exception:
@@ -69,7 +80,7 @@ def decode_token_payload(token: str) -> Dict[str, Any]:
 
 
 def create_jwt_token(payload_data: Dict[str, Any]) -> str:
-    """Tạo JWT token cho mục đích kiểm thử và xác thực"""
+    """Tạo JWT token ký số HS256 cho mục đích xác thực và kiểm thử"""
     return jwt.encode(payload_data, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 

@@ -1,0 +1,46 @@
+# =================================================================
+# QUY TẮC CẢNH BÁO TỰ ĐỘNG (ALERT RULES) - DỰ ÁN SMARTLIB (ICTU)
+# Sinh viên: Nguyễn Trung Học - MSSV: DTC245180174
+# =================================================================
+
+groups:
+  - name: smartlib_security_and_system_alerts
+    rules:
+      # -------------------------------------------------------------
+      # CẢNH BÁO 1: PHÁT HIỆN TẤN CÔNG BRUTE-FORCE / TẦN SUẤT ĐỘT BIẾN
+      # -------------------------------------------------------------
+      - alert: SmartLib_HighRequestRate_BruteForce
+        expr: rate(nginx_http_requests_total[1m]) * 60 > 10
+        for: 10s
+        labels:
+          severity: critical
+          project: smartlib
+        annotations:
+          summary: "Cảnh báo an ninh: Phát hiện tấn công Brute-force hoặc đột biến lưu lượng"
+          description: "Tần suất yêu cầu HTTP qua Nginx vượt quá 10 req/phút liên tục trong 10 giây (nguy cơ dò mật khẩu hoặc quét lỗ hổng)."
+
+      # -------------------------------------------------------------
+      # CẢNH BÁO 2: CONTAINER HOẶC DỊCH VỤ HỆ THỐNG BỊ SẬP (SERVICE DOWN)
+      # -------------------------------------------------------------
+      - alert: SmartLib_ServiceContainerDown
+        expr: up == 0
+        for: 15s
+        labels:
+          severity: critical
+          project: smartlib
+        annotations:
+          summary: "Cảnh báo hạ tầng: Dịch vụ container SmartLib bị gián đoạn (DOWN)"
+          description: "Target {{ $labels.job }} ({{ $labels.instance }}) không phản hồi cào dữ liệu trong hơn 15 giây."
+
+      # -------------------------------------------------------------
+      # CẢNH BÁO 3: CƠ SỞ DỮ LIỆU MYSQL BỊ MẤT KẾT NỐI
+      # -------------------------------------------------------------
+      - alert: SmartLib_MySQL_Down
+        expr: mysql_up == 0
+        for: 10s
+        labels:
+          severity: disaster
+          project: smartlib
+        annotations:
+          summary: "Cảnh báo CSDL: Máy chủ MySQL SmartLib bị ngắt kết nối"
+          description: "Không thể kết nối tới máy chủ MySQL {{ $labels.instance }}, hệ thống mượn trả có nguy cơ tê liệt."

@@ -1,0 +1,35 @@
+# =============================================================
+# CẤU HÌNH LOKI SERVER - DỰ ÁN SMARTLIB (ICTU)
+# Sinh viên: Nguyễn Trung Học - MSSV: DTC245180174
+# =============================================================
+
+auth_enabled: false  # Tắt chế độ xác thực đa người thuê (Multi-tenancy) phù hợp đồ án đơn cụm
+
+server:
+  http_listen_port: 3100   # Mở cổng HTTP 3100 để Promtail đẩy log vào và Grafana truy vấn
+  grpc_listen_port: 9096
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:            # Lưu trữ log trực tiếp trên ổ cứng nội bộ của container
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb          # Định dạng lưu trữ chỉ mục chuỗi thời gian hiện đại của Loki 2.9
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h        # Tạo phân vùng chỉ mục 24 giờ một lần
+
+analytics:
+  reporting_enabled: false # Tắt gửi báo cáo telemetry về máy chủ bên ngoài

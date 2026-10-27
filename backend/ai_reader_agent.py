@@ -208,13 +208,14 @@ def execute_get_my_active_borrows(db: dict, user_id: Optional[int], user_name: O
     user_records = [
         r for r in records
         if int(r.get("readerId") or r.get("userId") or 0) == int(user_id)
+        or (user_name and (r.get("readerName") or "").strip().lower() == user_name.strip().lower())
     ]
 
     # Lọc theo trạng thái
     active_records = []
     for r in user_records:
         st = r.get("status")
-        if status_filter == "Đang mượn" and st not in ["Đang mượn", "Quá hạn"]:
+        if status_filter == "Đang mượn" and st not in ["Đang mượn", "Quá hạn", "Chờ duyệt"]:
             continue
         if status_filter == "Chờ duyệt" and st != "Chờ duyệt":
             continue

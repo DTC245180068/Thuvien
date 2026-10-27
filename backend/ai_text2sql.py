@@ -1,7 +1,10 @@
 """
 Module: ai_text2sql.py
 Chức năng: Trợ lý truy vấn thông minh (Text-to-SQL Chatbot) cho Quản trị viên/Thủ thư.
-Bảo mật: CHỈ CHO PHÉP CÂU LỆNH SELECT, CHẶN TUYỆT ĐỐI INSERT/UPDATE/DELETE/DROP.
+Bảo mật:
+  - CHỈ CHO PHÉP CÂU LỆNH SELECT, CHẶN TUYỆT ĐỐI INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE.
+  - CHẶN TRUY XUẤT CỘT DỮ LIỆU NHẠY CẢM (password, password_hash, api_key, jwt_secret).
+  - Hỗ trợ cả Google Gemini API và OpenAI API + Semantic Heuristic Fallback.
 """
 
 import os
@@ -21,7 +24,7 @@ from auth_dependency import verify_admin_role
 
 router = APIRouter(prefix="/api/ai", tags=["AI Text-to-SQL"], dependencies=[Depends(verify_admin_role)])
 
-# Schema CSDL chi tiết cung cấp cho LLM
+# Schema CSDL chi tiết cung cấp cho LLM (Đã ẩn cột password_hash để bảo mật dữ liệu theo Tiêu chí 3.4)
 DATABASE_SCHEMA_PROMPT = """
 Cơ sở dữ liệu thư viện SmartLib (MySQL/SQLite) bao gồm các bảng và cột chính sau:
 
@@ -36,7 +39,7 @@ Cơ sở dữ liệu thư viện SmartLib (MySQL/SQLite) bao gồm các bảng v
    - status: VARCHAR(50) (Trạng thái: 'Sẵn sàng', 'Hết sách', 'Sắp phát hành')
    - published_year: INT (Năm xuất bản)
 
-2. users (Tài khoản người dùng & Độc giả):
+2. users (Tài khoản người dùng & Độc giả - KHÔNG BAO GIỜ TRUY VẤN MẬT KHẨU):
    - id: INT PRIMARY KEY
    - username: VARCHAR(50) (Tên đăng nhập)
    - full_name: VARCHAR(100) (Họ và tên)
@@ -88,9 +91,14 @@ DISALLOWED_SQL_KEYWORDS = [
     "PRAGMA", "INFORMATION_SCHEMA", "INTO", "OUTFILE", "DUMPFILE"
 ]
 
+# Các cột dữ liệu nhạy cảm bị cấm truy xuất qua Text-to-SQL (Tiêu chí 3.4)
+SENSITIVE_DATA_KEYWORDS = [
+    "PASSWORD_HASH", "PASSWORD", "JWT_SECRET", "API_KEY", "SECRET_KEY"
+]
+
 
 class AdminQueryRequest(BaseModel):
-    query: str
+    query: Optional[str] = ""
     sql: Optional[str] = None
 
 
@@ -107,9 +115,9 @@ class AdminQueryResponse(BaseModel):
 
 def validate_sql(sql_query: str) -> bool:
     """
-    Quét và CHẶN các từ khóa nguy hiểm bằng Regex: DROP, DELETE, UPDATE, INSERT, ALTER, TRUNCATE.
-    Nếu phát hiện từ khóa cấm, dừng việc thực thi và trả về HTTP Status 403 với thông báo:
-    "Cảnh báo bảo mật: Câu lệnh chứa thao tác không được phép."
+    Quét và CHẶN các từ khóa nguy hiểm bằng Regex: DROP, DELETE, UPDATE, INSERT, ALTER, TRUNCATE
+    cũng như chặn truy xuất các trường nhạy cảm (password, password_hash).
+    Nếu phát hiện vi phạm, dừng việc thực thi và trả về HTTP Status 403.
     """
     if not sql_query or not isinstance(sql_query, str):
         raise HTTPException(
@@ -120,8 +128,7 @@ def validate_sql(sql_query: str) -> bool:
     # Loại bỏ comment SQL để tránh bypass qua comment (ví dụ /*! DELETE */, -- DROP)
     clean_sql = re.sub(r"--.*?$|/\*.*?\*/", "", sql_query, flags=re.MULTILINE | re.DOTALL).strip()
 
-    # Quét và CHẶN các từ khóa nguy hiểm: DROP, DELETE, UPDATE, INSERT, ALTER, TRUNCATE
-    # Quét cả trên chuỗi gốc và chuỗi đã làm sạch comment để chống mọi thủ thuật bypass
+    # 1. Quét và CHẶN các từ khóa thay đổi/phá hủy CSDL: DROP, DELETE, UPDATE, INSERT, ALTER, TRUNCATE
     forbidden_pattern = r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE)\b"
     if re.search(forbidden_pattern, sql_query, flags=re.IGNORECASE) or re.search(forbidden_pattern, clean_sql, flags=re.IGNORECASE):
         raise HTTPException(
@@ -129,12 +136,20 @@ def validate_sql(sql_query: str) -> bool:
             detail="Cảnh báo bảo mật: Câu lệnh chứa thao tác không được phép."
         )
 
-    # Chặn thêm các từ khóa thực thi nhúng hoặc can thiệp CSDL nguy hiểm khác
+    # 2. Chặn thêm các từ khóa thực thi nhúng hoặc can thiệp hệ thống nguy hiểm khác
     extra_danger_pattern = r"\b(EXEC|EXECUTE|GRANT|REVOKE|REPLACE|ATTACH|DETACH|PRAGMA|INTO\s+OUTFILE|DUMPFILE)\b"
     if re.search(extra_danger_pattern, clean_sql, flags=re.IGNORECASE):
         raise HTTPException(
             status_code=403,
             detail="Cảnh báo bảo mật: Câu lệnh chứa thao tác không được phép."
+        )
+
+    # 3. Chặn truy xuất các cột dữ liệu nhạy cảm (password, password_hash) theo Tiêu chí 3.4
+    sensitive_pattern = r"\b(password_hash|password|jwt_secret|api_key)\b"
+    if re.search(sensitive_pattern, sql_query, flags=re.IGNORECASE) or re.search(sensitive_pattern, clean_sql, flags=re.IGNORECASE):
+        raise HTTPException(
+            status_code=403,
+            detail="Cảnh báo bảo mật: Không được phép truy xuất trường dữ liệu nhạy cảm (mật khẩu / khóa bảo mật)."
         )
 
     return True
@@ -153,14 +168,14 @@ def validate_read_only_sql(sql: str) -> bool:
     if not re.match(r"^(SELECT|WITH)\s+", clean_sql, re.IGNORECASE):
         return False
 
-    # Chặn nhiều câu lệnh phân tách bằng dấu chấm phẩy
+    # Chặn nhiều câu lệnh phân tách bằng dấu chấm phẩy (Stacked Queries SQL Injection)
     statements = [s.strip() for s in clean_sql.split(";") if s.strip()]
     if len(statements) > 1:
         return False
 
-    # Kiểm tra các từ khóa cấm
+    # Kiểm tra các từ khóa cấm và cột nhạy cảm
     upper_sql = f" {clean_sql.upper()} "
-    for kw in DISALLOWED_SQL_KEYWORDS:
+    for kw in DISALLOWED_SQL_KEYWORDS + SENSITIVE_DATA_KEYWORDS:
         pattern = rf"\b{kw}\b"
         if re.search(pattern, upper_sql):
             return False
@@ -169,57 +184,93 @@ def validate_read_only_sql(sql: str) -> bool:
 
 
 def _translate_with_llm(user_prompt: str) -> Optional[dict]:
-    """Gọi OpenAI API để dịch câu hỏi tự nhiên sang SQL SELECT an toàn"""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    """Gọi Google Gemini API hoặc OpenAI API để dịch câu hỏi tự nhiên sang SQL SELECT an toàn"""
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
+
+    if not gemini_key and not openai_key:
         return None
 
-    try:
-        system_instruction = f"""
-        Bạn là Chuyên gia Database Administrator và AI Assistant của Hệ thống Quản lý Thư viện SmartLib.
-        Nhiệm vụ của bạn là chuyển đổi câu hỏi bằng Tiếng Việt của Thủ thư thành câu truy vấn SQL SELECT duy nhất và chuẩn cú pháp.
-        
-        Quy tắc BẮT BUỘC:
-        1. CHỈ tạo câu lệnh SELECT. Tuyệt đối KHÔNG sử dụng INSERT, UPDATE, DELETE, DROP, ALTER.
-        2. Bảng và Cột phải khớp 100% với Schema dưới đây:
-        {DATABASE_SCHEMA_PROMPT}
-        3. Kết quả trả về đúng định dạng JSON:
-        {{
-           "sql": "SELECT ... LIMIT 100",
-           "explanation": "Mô tả ngắn gọn kết quả này lấy những thông tin gì để trả lời câu hỏi"
-        }}
-        4. Luôn giới hạn tối đa 100 bản ghi (LIMIT 100) để đảm bảo tốc độ.
-        5. Chỉ trả về JSON thuần, không bọc markdown.
-        """
+    system_instruction = f"""
+Bạn là Chuyên gia Database Administrator và AI Assistant của Hệ thống Quản lý Thư viện SmartLib.
+Nhiệm vụ của bạn là chuyển đổi câu hỏi bằng Tiếng Việt của Thủ thư thành câu truy vấn SQL SELECT duy nhất và chuẩn cú pháp.
 
-        payload = {
-            "model": "gpt-4o-mini",
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 500
-        }
+Quy tắc BẮT BUỘC:
+1. CHỈ tạo câu lệnh SELECT. Tuyệt đối KHÔNG sử dụng INSERT, UPDATE, DELETE, DROP, ALTER.
+2. Tuyệt đối KHÔNG truy vấn cột password hoặc password_hash. Nếu người dùng hỏi về bảng users, luôn liệt kê rõ các cột an toàn: id, username, full_name, role, email, phone, is_active, is_locked.
+3. Bảng và Cột phải khớp 100% với Schema dưới đây:
+{DATABASE_SCHEMA_PROMPT}
+4. Kết quả trả về đúng định dạng JSON:
+{{
+   "sql": "SELECT ... LIMIT 100",
+   "explanation": "Mô tả ngắn gọn kết quả này lấy những thông tin gì để trả lời câu hỏi"
+}}
+5. Luôn giới hạn tối đa 100 bản ghi (LIMIT 100) để đảm bảo tốc độ.
+6. Chỉ trả về JSON thuần, không bọc markdown.
+"""
 
-        req = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
+    # Ưu tiên 1: Google Gemini API nếu có GEMINI_API_KEY
+    if gemini_key:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            payload = {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [{"text": f"{system_instruction}\n\nCâu hỏi của Thủ thư: {user_prompt}"}]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 500
+                }
             }
-        )
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                content = resp_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                content = re.sub(r"^```json\s*", "", content)
+                content = re.sub(r"\s*```$", "", content)
+                return json.loads(content)
+        except Exception as e:
+            print(f"[Text-to-SQL] Gemini translation failed: {e}")
 
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            resp_data = json.loads(resp.read().decode("utf-8"))
-            content = resp_data["choices"][0]["message"]["content"].strip()
-            content = re.sub(r"^```json\s*", "", content)
-            content = re.sub(r"\s*```$", "", content)
-            return json.loads(content)
-    except Exception as e:
-        print(f"[Text-to-SQL] OpenAI translation failed: {e}")
-        return None
+    # Ưu tiên 2: OpenAI API nếu có OPENAI_API_KEY
+    if openai_key:
+        try:
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 500
+            }
+
+            req = urllib.request.Request(
+                "https://api.openai.com/v1/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {openai_key}"
+                }
+            )
+
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                content = resp_data["choices"][0]["message"]["content"].strip()
+                content = re.sub(r"^```json\s*", "", content)
+                content = re.sub(r"\s*```$", "", content)
+                return json.loads(content)
+        except Exception as e:
+            print(f"[Text-to-SQL] OpenAI translation failed: {e}")
+
+    return None
 
 
 def _translate_heuristic(prompt: str) -> dict:
@@ -377,6 +428,7 @@ def _translate_heuristic(prompt: str) -> dict:
 def _execute_safe_query(sql_query: str) -> tuple[List[str], List[Dict[str, Any]]]:
     """
     Thực thi câu lệnh SQL SELECT an toàn trên kết nối MySQL (hoặc SQLite fallback).
+    Đồng thời lọc bỏ các cột nhạy cảm (password, password_hash) nếu người dùng gọi SELECT * FROM users.
     """
     engine = None
     # Ưu tiên MySQL nếu đang kết nối
@@ -388,15 +440,20 @@ def _execute_safe_query(sql_query: str) -> tuple[List[str], List[Dict[str, Any]]
     if not engine:
         raise Exception("Không tìm thấy kết nối Cơ sở dữ liệu khả dụng.")
 
+    hidden_cols = {"password", "password_hash", "jwt_secret", "api_key"}
+
     with engine.connect() as connection:
         result = connection.execute(text(sql_query))
-        columns = list(result.keys())
+        raw_columns = list(result.keys())
+        safe_columns = [c for c in raw_columns if c.lower() not in hidden_cols]
         rows = result.fetchall()
 
         data = []
         for row in rows:
             row_dict = {}
-            for col_idx, col_name in enumerate(columns):
+            for col_idx, col_name in enumerate(raw_columns):
+                if col_name.lower() in hidden_cols:
+                    continue
                 val = row[col_idx]
                 # Chuẩn hóa các kiểu dữ liệu cho JSON serialization
                 if isinstance(val, (datetime, date)):
@@ -409,13 +466,13 @@ def _execute_safe_query(sql_query: str) -> tuple[List[str], List[Dict[str, Any]]
                     row_dict[col_name] = val
             data.append(row_dict)
 
-        return columns, data
+        return safe_columns, data
 
 
 @router.post("/admin-query", response_model=AdminQueryResponse)
 async def handle_admin_query(req: AdminQueryRequest):
     """
-    Endpoint Text-to-SQL: Tiếp nhận câu hỏi tiếng Việt -> Sinh SQL SELECT -> Chặn lệnh nguy hiểm -> Trả kết quả JSON
+    Endpoint Text-to-SQL: Tiếp nhận câu hỏi tiếng Việt -> Sinh SQL SELECT -> Chặn lệnh nguy hiểm & cột mật khẩu -> Trả kết quả JSON
     """
     user_prompt = (req.query or "").strip()
     direct_sql = (req.sql or "").strip()
@@ -423,18 +480,25 @@ async def handle_admin_query(req: AdminQueryRequest):
     if not user_prompt and not direct_sql:
         raise HTTPException(status_code=400, detail="Vui lòng nhập câu hỏi truy vấn.")
 
+    # Kiểm tra ngay trên câu hỏi tự nhiên nếu người dùng cố tình hỏi mật khẩu hoặc truyền SQL nguy hiểm
+    clean_prompt = re.sub(r"--.*?$|/\*.*?\*/", "", user_prompt, flags=re.MULTILINE | re.DOTALL).strip()
+    if re.search(r"\b(password_hash|password|mật\s*khẩu)\b", clean_prompt, flags=re.IGNORECASE):
+        raise HTTPException(
+            status_code=403,
+            detail="Cảnh báo bảo mật: Không được phép truy xuất trường dữ liệu nhạy cảm (mật khẩu / khóa bảo mật)."
+        )
+
     if direct_sql:
         sql = direct_sql
         explanation = "Thực thi truy vấn SQL được cung cấp."
     else:
-        # 1. Thử dịch bằng LLM (OpenAI API nếu có)
+        # 1. Thử dịch bằng LLM (Gemini / OpenAI API nếu có)
         translated = _translate_with_llm(user_prompt)
 
         # 2. Fallback: Nếu không có LLM
         if not translated or not translated.get("sql"):
             # Nếu user_prompt truyền vào thẳng một câu lệnh SQL chứa từ khóa cấm
-            clean_prompt = re.sub(r"--.*?$|/\*.*?\*/", "", user_prompt, flags=re.MULTILINE | re.DOTALL).strip()
-            if re.search(r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE)\b", clean_prompt, flags=re.IGNORECASE):
+            if re.search(r"\b(DROP|DELETE|UPDATE|INSERT|ALTER|TRUNCATE|EXEC|EXECUTE|INTO\s+OUTFILE)\b", clean_prompt, flags=re.IGNORECASE):
                 sql = user_prompt
                 explanation = "Yêu cầu thực thi câu lệnh SQL."
             else:
@@ -445,18 +509,18 @@ async def handle_admin_query(req: AdminQueryRequest):
             sql = translated.get("sql", "").strip()
             explanation = translated.get("explanation", "Truy vấn dữ liệu theo yêu cầu.")
 
-    # 3. QUÉT VÀ CHẶN TỪ KHÓA NGUY HIỂM BẰNG REGEX (validate_sql)
-    # Dừng việc thực thi ngay lập tức và trả về HTTP Status 403 nếu phát hiện từ khóa cấm
+    # 3. QUÉT VÀ CHẶN TỪ KHÓA NGUY HIỂM & CỘT NHẠY CẢM BẰNG REGEX (validate_sql)
+    # Dừng việc thực thi ngay lập tức và trả về HTTP Status 403 nếu phát hiện vi phạm
     validate_sql(sql)
 
-    # 4. Kiểm tra bổ sung đảm bảo chỉ là câu lệnh SELECT an toàn
+    # 4. Kiểm tra bổ sung đảm bảo chỉ là câu lệnh SELECT đơn lẻ an toàn
     if not validate_read_only_sql(sql):
         raise HTTPException(
             status_code=403,
             detail="Cảnh báo bảo mật: Câu lệnh chứa thao tác không được phép."
         )
 
-    # 4. Thực thi truy vấn
+    # 5. Thực thi truy vấn
     try:
         columns, data = _execute_safe_query(sql)
         return AdminQueryResponse(
@@ -481,4 +545,3 @@ async def handle_admin_query(req: AdminQueryRequest):
             explanation=explanation,
             error=f"Lỗi thực thi SQL: {str(e)}"
         )
-

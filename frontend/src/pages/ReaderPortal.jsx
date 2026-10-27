@@ -228,9 +228,9 @@ export default function ReaderPortal({ activeTab, onTabChange }) {
   const lockDays = Number(systemSettings?.autoLockAfterDays || 3);
   const graceDays = Number(systemSettings?.gracePeriodDays || 0);
 
-  // Kiểm tra tài khoản có bị khóa hoặc có sách trễ hạn >= lockDays ngày không
+  // Kiểm tra tài khoản có bị khóa hoặc có sách trễ hạn >= lockDays ngày không (Chỉ kiểm tra sách Đang mượn hoặc Quá hạn)
   const overdueBorrows = myBorrows.filter(r => {
-    if (r.status === 'Đã trả' || r.status === 'Từ chối' || r.status === 'Chờ duyệt') return false;
+    if (r.status !== 'Đang mượn' && r.status !== 'Quá hạn') return false;
     if (r.status === 'Quá hạn') return true;
     const dueStr = r.returnDate || r.dueDate;
     if (!dueStr) return false;

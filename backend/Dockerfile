@@ -27,6 +27,12 @@ COPY . .
 # Tạo thư mục cho database và settings nếu cần
 RUN mkdir -p /app/database
 
+# Tạo user thường 'appuser' (UID 1001) và trao quyền thư mục /app
+RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
+
+# Chuyển quyền thực thi sang appuser
+USER appuser
+
 # Mở cổng 8000 cho FastAPI
 EXPOSE 8000
 
