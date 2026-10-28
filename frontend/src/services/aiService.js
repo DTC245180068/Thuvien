@@ -1,13 +1,14 @@
 import { AI_CONFIG, getActiveApiKey } from '../config/aiConfig';
 
 /**
- * Kiểm soát biên & câu hỏi ngoài phạm vi ngay tại Client (dùng khi chạy bản tĩnh GitHub Pages)
+ * Kiểm soát biên, bộ nhớ theo phiên & câu hỏi ngoài phạm vi ngay tại Client (dùng khi chạy bản tĩnh GitHub Pages)
  */
-const generateLocalSmartResponse = (question, books = [], userObj = null, apiKey = '') => {
+const generateLocalSmartResponse = (question, books = [], userObj = null, apiKey = '', history = []) => {
   const rawQ = (question || '').trim();
   const q = rawQ.toLowerCase();
   const userName = userObj?.fullName || userObj?.FullName || userObj?.username || '';
   const greeting = userName ? `Chào bạn ${userName} nha! ✨` : 'Chào bạn nha! ✨';
+  const politeGreeting = userName ? `Dạ mình chào ${userName} ạ 😊` : 'Dạ mình chào bạn ạ 😊';
 
   // 1. Kiểm soát biên độ dài & ký tự đặc biệt
   if (!rawQ) {
@@ -57,6 +58,44 @@ const generateLocalSmartResponse = (question, books = [], userObj = null, apiKey
       tool_call: null,
       suggested_books: [],
       intent: 'api_key_error'
+    };
+  }
+
+  // 3B. Kiểm tra bộ nhớ phiên (Session Memory) khi người dùng nhắn "đồng ý", "ok", "gợi ý đi"...
+  const cleanQ = q.replace(/[!.,?~]+$/g, '').trim();
+  const isAffirmative = ['đồng ý', 'dong y', 'ok', 'oke', 'okay', 'dạ', 'vâng', 'có', 'có ạ', 'gợi ý đi', 'giới thiệu đi', 'cho mình xem'].includes(cleanQ);
+  if (isAffirmative && Array.isArray(history) && history.length > 0) {
+    const prevText = history.map(m => (m.content || m.text || '').toLowerCase()).join(' ');
+    let targetCat = 'Văn học';
+    let topicLabel = 'chủ đề bạn vừa quan tâm';
+    if (/chu du|tam quốc|lịch sử|dã sử|tiểu thuyết|văn học/.test(prevText)) {
+      targetCat = 'Văn học';
+      topicLabel = 'Lịch sử & Tiểu thuyết Văn học';
+    } else if (/code|lập trình|python|công nghệ|ai/.test(prevText)) {
+      targetCat = 'Công nghệ';
+      topicLabel = 'Công nghệ & Lập trình';
+    } else if (/giá vàng|chứng khoán|kinh tế|tài chính|đầu tư/.test(prevText)) {
+      targetCat = 'Kinh tế';
+      topicLabel = 'Kinh tế & Tài chính';
+    }
+    const matched = books.filter(b => b.category && b.category.toLowerCase().includes(targetCat.toLowerCase())).slice(0, 3);
+    const fallbackMatched = matched.length > 0 ? matched : books.slice(0, 3);
+    const suggested = fallbackMatched.map(b => ({
+      book_id: b.id,
+      title: b.title,
+      author: b.author || 'Tác giả',
+      reason: `Sách hay thể loại ${b.category || targetCat}, hiện sẵn sàng cho mượn.`
+    }));
+    return {
+      found: true,
+      answer: `${politeGreeting} Tiếp nối câu chuyện vừa rồi về **${topicLabel}**, mình xin giới thiệu cho bạn các đầu sách hấp dẫn đang có sẵn trong kho **Thư viện SmartLib** nhé: 📚✨\n\nBạn có thể bấm trực tiếp vào thẻ sách bên dưới để xem chi tiết hoặc đăng ký mượn ngay nha! 🥰`,
+      tool_call: {
+        name: 'recommend_books',
+        arguments: { genre: targetCat, limit: 3 },
+        status: 'executed'
+      },
+      suggested_books: suggested,
+      intent: 'recommend_books'
     };
   }
 
@@ -186,17 +225,15 @@ Bạn có thể bấm vào thẻ sách bên dưới để xem chi tiết hoặc 
     };
   }
 
-  // 9. Câu hỏi ngoài phạm vi thư viện (Out-of-Scope Guardrail)
+  // 9. Câu hỏi ngoài phạm vi thư viện (Out-of-Scope Guardrail theo Form CSKH 3 đoạn)
+  const isMath = /\d+\s*[\+\-\*\/xX:]\s*\d+|bài toán|phép tính|bằng mấy/.test(q);
   return {
     found: false,
-    answer: `${greeting} ⚠️ Câu hỏi **"${rawQ}"** hiện nằm ngoài phạm vi nghiệp vụ của **Thủ thư AI Thư viện SmartLib**.
+    answer: `${politeGreeting}
 
-Mình được thiết kế với **Chốt chặn Phạm vi (Domain Guardrail)** chuyên hỗ trợ:
-- 📖 Tra cứu sách theo tên, tác giả, thể loại & vị trí kệ
-- 📋 Kiểm tra phiếu mượn, hạn trả & phí phạt cá nhân
-- 🔄 Hướng dẫn trả sách bằng **Mã QR**, xin gia hạn, đặt trước và nộp phạt **VNPay**
+Mình là trợ lý chăm sóc độc giả của **Thư viện SmartLib**, nên mình chỉ hỗ trợ các vấn đề liên quan đến tra cứu sách, kiểm tra tồn kho, phiếu mượn - trả, gia hạn hay tài khoản thư viện thôi ạ *(câu hỏi này nằm ngoài phạm vi nghiệp vụ của thư viện)*.
 
-🔑 *Lưu ý:* Để kích hoạt mô hình ngôn ngữ lớn (Google Gemini / OpenAI GPT) trả lời mở rộng, vui lòng cấu hình \`GEMINI_API_KEY\` trong file \`.env\` hoặc bấm nút ⚙️ **Cài đặt API Key** trên khung chat!`,
+Còn ${isMath ? 'bài toán này thì bạn có thể hỏi bạn bè hoặc dùng công cụ tính toán trên điện thoại' : 'câu hỏi này thì bạn có thể hỏi bạn bè hoặc tra cứu trên các công cụ tìm kiếm chuyên dụng'} nha. Nếu bạn muốn tìm hiểu thêm về chủ đề này qua các đầu sách trong kho SmartLib thì hãy nhắn **"Đồng ý"** để mình giới thiệu sách ngay, hoặc nếu cần hỗ trợ gì về SmartLib, cứ nhắn mình bất cứ lúc nào ạ 🥰`,
     tool_call: null,
     suggested_books: [],
     intent: 'out_of_scope'
@@ -205,9 +242,9 @@ Mình được thiết kế với **Chốt chặn Phạm vi (Domain Guardrail)**
 
 /**
  * Hàm gửi câu hỏi tới AI qua Backend Application Orchestrator
- * Tuân thủ Mô hình 2: Function Calling (Tool Calling) & Kiểm soát Trường hợp Biên
+ * Tuân thủ Mô hình 2: Function Calling (Tool Calling), Bộ nhớ theo Phiên (Session Memory) & Kiểm soát Biên
  */
-export const askLibraryAI = async (userQuestion, books = []) => {
+export const askLibraryAI = async (userQuestion, books = [], history = [], sessionId = null) => {
   const startTime = Date.now();
   const apiKey = getActiveApiKey();
   let aiResult = null;
@@ -225,7 +262,7 @@ export const askLibraryAI = async (userQuestion, books = []) => {
   const userId = userObj?.id || userObj?.UserID || null;
   const userName = userObj?.fullName || userObj?.FullName || userObj?.username || null;
 
-  // 1. GỬI TỚI BACKEND APPLICATION FUNCTION CALLING ENDPOINT
+  // 1. GỬI TỚI BACKEND APPLICATION FUNCTION CALLING ENDPOINT KÈM BỘ NHỚ PHIÊN
   try {
     const response = await fetch('/api/ai/reader-chat', {
       method: 'POST',
@@ -237,6 +274,8 @@ export const askLibraryAI = async (userQuestion, books = []) => {
         userId: userId,
         userName: userName,
         role: 'Reader',
+        sessionId: sessionId || null,
+        history: Array.isArray(history) ? history : [],
         apiKey: apiKey || null,
         provider: AI_CONFIG.PROVIDER || 'gemini'
       })
@@ -251,6 +290,7 @@ export const askLibraryAI = async (userQuestion, books = []) => {
         tool_call: data.tool_call,
         suggested_books: Array.isArray(data.suggested_books) ? data.suggested_books : [],
         intent: data.intent || 'general',
+        session_id: data.session_id || sessionId,
         has_api_key: Boolean(data.has_api_key)
       };
     } else if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 422) {
@@ -271,7 +311,7 @@ export const askLibraryAI = async (userQuestion, books = []) => {
 
   // 2. NẾU BACKEND OFFLINE (STATIC GITHUB PAGES) -> DÙNG LOCAL GUARDRAIL ENGINE
   if (!aiResult) {
-    aiResult = generateLocalSmartResponse(userQuestion, books, userObj, apiKey);
+    aiResult = generateLocalSmartResponse(userQuestion, books, userObj, apiKey, history);
   }
 
   const elapsed = Date.now() - startTime;

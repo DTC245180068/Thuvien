@@ -398,6 +398,16 @@ def execute_recommend_books(db: dict, genre: str = "", limit: int = 3) -> dict:
     books = db.get("books", [])
     g = (genre or "").lower().strip()
 
+    related_keywords = [g] if g else []
+    if any(k in g for k in ["lịch sử", "tam quốc", "dã sử", "văn học", "tiểu thuyết"]):
+        related_keywords.extend(["lịch sử", "văn học", "tiểu thuyết"])
+    elif any(k in g for k in ["khoa học", "toán", "logic", "vật lý"]):
+        related_keywords.extend(["khoa học", "công nghệ", "kỹ năng"])
+    elif any(k in g for k in ["công nghệ", "lập trình", "cntt", "code"]):
+        related_keywords.extend(["công nghệ", "lập trình", "python", "ai"])
+    elif any(k in g for k in ["kinh tế", "tài chính", "đầu tư", "kinh doanh"]):
+        related_keywords.extend(["kinh tế", "tài chính", "kinh doanh"])
+
     matched = []
     for b in books:
         cat = (b.get("category") or "").lower()
@@ -406,7 +416,7 @@ def execute_recommend_books(db: dict, genre: str = "", limit: int = 3) -> dict:
 
         if not g or g == "chung":
             matched.append(b)
-        elif g in cat or g in title or g in desc:
+        elif any(rk and (rk in cat or rk in title or rk in desc) for rk in related_keywords):
             matched.append(b)
 
     matched.sort(key=lambda x: int(x.get("available", x.get("available_copies", 0))), reverse=True)
@@ -641,6 +651,251 @@ def _safe_eval_math(expr_str: str) -> Optional[float]:
         return None
 
 
+# =========================================================================
+# 4B. BỘ NHỚ NGỮ CẢNH RIÊNG CHO TỪNG PHIÊN TRÒ CHUYỆN (PER-SESSION MEMORY)
+# =========================================================================
+
+SESSION_MEMORY: Dict[str, Dict[str, Any]] = {}
+
+
+def infer_topic_and_genre(text: str) -> tuple[str, str, bool]:
+    """
+    Phân tích câu hỏi hoặc nội dung hội thoại trước đó để suy luận:
+    (genre_in_db, topic_label, is_math_question)
+    """
+    p = (text or "").lower().strip()
+
+    math_match = re.search(r"(\d+(?:\.\d+)?\s*[\+\-\*\/xX:]\s*\d+(?:\.\d+)?)", p)
+    if math_match or any(k in p for k in ["bài toán", "phép tính", "bằng mấy", "tính toán", "phương trình", "đạo hàm", "tích phân"]):
+        return "Khoa học", "Khoa học & Tư duy Logic", True
+
+    if any(k in p for k in [
+        "chu du", "tam quốc", "tào tháo", "lưu bị", "gia cát lượng", "khổng minh", "quan vũ",
+        "trương phi", "đông ngô", "xích bích", "lịch sử", "triều đại", "vua ", "hoàng đế",
+        "chiến dịch", "chiến tranh", "dã sử", "tiểu thuyết", "văn học", "nhà văn", "nhà thơ"
+    ]):
+        return "Lịch sử", "lịch sử, tiểu thuyết dã sử & văn học", False
+
+    if any(k in p for k in [
+        "viết code", "lập trình", "code ", "c++", "java", "javascript", "python", "html",
+        "css", "sql", "react", "docker", "ai ", "trí tuệ nhân tạo", "thuật toán", "phần mềm", "công nghệ"
+    ]):
+        return "Công nghệ", "Công nghệ thông tin & Lập trình", False
+
+    if any(k in p for k in [
+        "giá vàng", "chứng khoán", "cổ phiếu", "bitcoin", "crypto", "tỷ giá", "lãi suất",
+        "bất động sản", "kinh tế", "tài chính", "đầu tư", "làm giàu", "kinh doanh", "khởi nghiệp"
+    ]):
+        return "Kinh tế", "Kinh tế, Tài chính & Đầu tư", False
+
+    if any(k in p for k in ["vật lý", "hóa học", "sinh học", "vũ trụ", "thiên văn", "khoa học"]):
+        return "Khoa học", "Khoa học & Khám phá", False
+
+    if any(k in p for k in ["kỹ năng", "tâm lý", "giao tiếp", "thói quen", "cảm xúc", "chữa lành", "phát triển bản thân"]):
+        return "Kỹ năng sống", "Kỹ năng sống & Phát triển bản thân", False
+
+    return "Kỹ năng sống", "các đầu sách hay chọn lọc", False
+
+
+def get_session_key(session_id: Optional[str], user_id: Optional[int]) -> str:
+    if session_id and session_id.strip():
+        return session_id.strip()
+    if user_id is not None:
+        return f"user_session_{user_id}"
+    return "default_guest_session"
+
+
+def get_or_sync_session_state(
+    session_key: str,
+    history: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
+    """
+    Lấy hoặc đồng bộ bộ nhớ phiên trò chuyện từ RAM (SESSION_MEMORY) kết hợp với lịch sử gửi từ Frontend (history).
+    Khi người dùng bấm xóa đoạn chat trên giao diện (history rỗng), tự động làm mới bộ nhớ phiên.
+    """
+    if history is not None and len(history) == 0 and session_key in SESSION_MEMORY:
+        SESSION_MEMORY.pop(session_key, None)
+
+    state = SESSION_MEMORY.setdefault(
+        session_key,
+        {
+            "turns": [],
+            "pending_genre": None,
+            "pending_topic_label": None,
+            "last_book_title": None,
+            "updated_at": datetime.now().isoformat(),
+        },
+    )
+
+    # Nếu Frontend truyền lịch sử hội thoại của phiên hiện tại, đồng bộ vào bộ nhớ để không bao giờ quên ngữ cảnh
+    if history:
+        for msg in history[-10:]:
+            content = (msg.get("content") or msg.get("text") or "").strip()
+            if not content:
+                continue
+            genre, topic_label, _ = infer_topic_and_genre(content)
+            if genre and topic_label and topic_label != "các đầu sách hay chọn lọc":
+                state["pending_genre"] = genre
+                state["pending_topic_label"] = topic_label
+            sug = msg.get("suggested_books")
+            if isinstance(sug, list) and len(sug) > 0 and sug[0].get("title"):
+                state["last_book_title"] = sug[0].get("title")
+
+        if not state["turns"]:
+            for msg in history[-8:]:
+                role = msg.get("role") or ("user" if msg.get("sender") == "user" else "assistant")
+                content = (msg.get("content") or msg.get("text") or "").strip()
+                if content:
+                    state["turns"].append({"role": role, "content": content})
+
+    return state
+
+
+def save_turn_to_session(
+    session_key: str,
+    user_prompt: str,
+    ai_reply: str,
+    intent_name: str,
+    suggested_books: list,
+    inferred_genre: Optional[str] = None,
+    inferred_topic_label: Optional[str] = None,
+):
+    state = SESSION_MEMORY.setdefault(
+        session_key,
+        {
+            "turns": [],
+            "pending_genre": None,
+            "pending_topic_label": None,
+            "last_book_title": None,
+            "updated_at": datetime.now().isoformat(),
+        },
+    )
+    state["turns"].append({"role": "user", "content": user_prompt, "intent": intent_name})
+    state["turns"].append({"role": "assistant", "content": ai_reply, "intent": intent_name})
+    state["turns"] = state["turns"][-16:]
+    state["updated_at"] = datetime.now().isoformat()
+
+    if inferred_genre:
+        state["pending_genre"] = inferred_genre
+    if inferred_topic_label:
+        state["pending_topic_label"] = inferred_topic_label
+    if suggested_books and isinstance(suggested_books, list) and len(suggested_books) > 0:
+        first_title = suggested_books[0].get("title")
+        if first_title:
+            state["last_book_title"] = first_title
+
+
+def resolve_followup_with_session_memory(
+    user_prompt: str,
+    session_state: Dict[str, Any],
+    db: dict,
+    user_id: Optional[int],
+    user_name: Optional[str],
+) -> Optional[tuple[str, dict, list, str]]:
+    """
+    Kiểm tra xem câu chat hiện tại có phải là câu trả lời tiếp nối ngữ cảnh phiên trước hay không:
+    1. Người dùng nhắn "đồng ý", "ok", "có", "vâng", "dạ", "gợi ý đi", "giới thiệu đi", "cho mình xem"...
+       -> Lấy chủ đề ở câu hỏi trước trong phiên (ví dụ: Lịch sử Tam Quốc / Chu Du / Lập trình / Kinh tế...) để gợi ý sách ngay!
+    2. Người dùng hỏi tiếp về cuốn sách vừa nhắc tới ("cuốn đó còn không", "tác giả cuốn đó là ai", "sách đó ở kệ nào")
+       -> Lấy last_book_title trong bộ nhớ phiên để kiểm tra tồn kho!
+    3. Người dùng hỏi "còn cuốn nào khác không", "gợi ý thêm đi"
+       -> Gợi ý thêm sách cùng thể loại trong phiên!
+    """
+    p = user_prompt.lower().strip()
+    clean_p = re.sub(r"[!.,?~]+$", "", p).strip()
+
+    has_previous_context = bool(
+        session_state.get("turns")
+        or session_state.get("pending_genre")
+        or session_state.get("last_book_title")
+    )
+    if not has_previous_context:
+        return None
+
+    # Nhóm 1: Độc giả xác nhận "Đồng ý" / "OK" / "Gợi ý đi" sau khi AI đề xuất giới thiệu sách ở lượt trước
+    affirmative_exact = {
+        "đồng ý", "dong y", "ok", "oke", "okay", "okie", "dạ", "vâng", "ừ", "ừa", "uh",
+        "có", "có ạ", "có nhé", "được", "được nhé", "nhất trí", "triển đi", "gợi ý đi",
+        "giới thiệu đi", "giới thiệu sách đi", "gợi ý sách đi", "cho mình xem", "cho tôi xem",
+        "tìm giúp mình", "tìm giúp tôi", "ok bạn", "đồng ý nhé", "đồng ý ạ", "vâng ạ"
+    }
+    is_affirmative = (
+        clean_p in affirmative_exact
+        or any(
+            clean_p.startswith(prefix) and len(clean_p) <= 35
+            for prefix in ["đồng ý", "ok ", "dạ đồng ý", "vâng đồng ý", "gợi ý cho", "giới thiệu cho", "cho mình xem sách"]
+        )
+    )
+
+    if is_affirmative:
+        genre = session_state.get("pending_genre") or "Văn học"
+        topic_label = session_state.get("pending_topic_label") or "chủ đề bạn vừa quan tâm"
+
+        # Nếu chưa có pending_genre rõ ràng, quét lại các lượt hội thoại trước trong phiên
+        if not session_state.get("pending_genre") and session_state.get("turns"):
+            for turn in reversed(session_state["turns"]):
+                g_cand, t_cand, _ = infer_topic_and_genre(turn.get("content", ""))
+                if t_cand != "các đầu sách hay chọn lọc":
+                    genre = g_cand
+                    topic_label = t_cand
+                    break
+
+        fn_name = "recommend_books"
+        fn_args = {"genre": genre, "limit": 3}
+        tool_result = run_tool(fn_name, fn_args, db, user_id, user_name)
+        _, suggested_books = generate_natural_response_from_tool(fn_name, fn_args, tool_result, user_name)
+
+        greeting = f"Dạ mình chào {user_name} ạ 😊" if user_name else "Dạ vâng ạ 😊"
+        lines = [
+            f"{greeting} Tiếp nối câu chuyện vừa rồi về **{topic_label}**, mình xin giới thiệu cho bạn các đầu sách hấp dẫn đang có sẵn trong kho **Thư viện SmartLib** nhé: 📚✨\n"
+        ]
+        for idx, b in enumerate(tool_result.get("recommendations", []), start=1):
+            lines.append(
+                f"{idx}. 📘 **{b['title']}** — *Tác giả: {b['author']}* (Thể loại: {b['category']} | Còn sẵn: **{b['available_copies']} cuốn**)"
+            )
+        lines.append("\nBạn có thể bấm trực tiếp vào thẻ sách bên dưới để xem chi tiết hoặc đăng ký mượn ngay nha! 🥰")
+
+        tool_call_meta = {
+            "name": fn_name,
+            "arguments": fn_args,
+            "status": "executed",
+            "context_memory": f"Khôi phục ngữ cảnh phiên: {topic_label}"
+        }
+        return "\n".join(lines), tool_call_meta, suggested_books, fn_name
+
+    # Nhóm 2: Độc giả hỏi tiếp về cuốn sách vừa nhắc tới ở lượt trước ("cuốn đó còn không", "sách đó ở kệ nào", "tác giả cuốn đó")
+    last_book = session_state.get("last_book_title")
+    if last_book and any(k in clean_p for k in ["cuốn đó", "sách đó", "cuốn này", "sách này", "tác phẩm đó"]):
+        fn_name = "check_book_availability"
+        fn_args = {"book_title": last_book}
+        tool_result = run_tool(fn_name, fn_args, db, user_id, user_name)
+        final_reply, suggested_books = generate_natural_response_from_tool(fn_name, fn_args, tool_result, user_name)
+        tool_call_meta = {
+            "name": fn_name,
+            "arguments": fn_args,
+            "status": "executed",
+            "context_memory": f"Khôi phục sách từ phiên: {last_book}"
+        }
+        return final_reply, tool_call_meta, suggested_books, fn_name
+
+    # Nhóm 3: Độc giả hỏi "còn cuốn nào khác không", "gợi ý thêm sách khác"
+    if any(k in clean_p for k in ["còn cuốn nào khác", "còn sách nào khác", "gợi ý thêm", "giới thiệu thêm"]):
+        genre = session_state.get("pending_genre") or "Chung"
+        fn_name = "recommend_books"
+        fn_args = {"genre": genre, "limit": 4}
+        tool_result = run_tool(fn_name, fn_args, db, user_id, user_name)
+        final_reply, suggested_books = generate_natural_response_from_tool(fn_name, fn_args, tool_result, user_name)
+        tool_call_meta = {
+            "name": fn_name,
+            "arguments": fn_args,
+            "status": "executed",
+            "context_memory": f"Mở rộng gợi ý theo phiên: {genre}"
+        }
+        return final_reply, tool_call_meta, suggested_books, fn_name
+
+    return None
+
+
 def handle_out_of_scope_or_general_question(
     user_prompt: str,
     user_name: Optional[str],
@@ -650,9 +905,9 @@ def handle_out_of_scope_or_general_question(
     """
     Xử lý chuẩn xác các câu hỏi ngoài phạm vi 5 hàm CSDL (Out-of-Scope / General Chat):
     - Nhận diện chào hỏi / hỏi thông tin trợ lý AI.
-    - Nhận diện biểu thức toán học cơ bản.
-    - Nhận diện câu hỏi ngoài phạm vi thư viện (thời tiết, bóng đá, giá vàng, nấu ăn, viết code, v.v.)
-      và trả lời theo đúng Domain Guardrail kèm gợi ý sách liên quan + hướng dẫn cấu hình API Key nếu chưa có.
+    - Nhận diện câu hỏi thống kê thư viện.
+    - Đối với MỌI câu hỏi ngoài phạm vi thư viện (toán học, lịch sử, thời tiết, bóng đá, giá vàng, viết code...),
+      trả lời theo đúng Form CSKH 3 đoạn chuẩn mực (giống mẫu Shopee CSKH) kèm gợi mở giới thiệu sách theo phiên.
     """
     p = user_prompt.lower().strip()
     user_display = user_name or "bạn"
@@ -661,12 +916,9 @@ def handle_out_of_scope_or_general_question(
     # 1. Nhóm chào hỏi / cảm ơn / hỏi danh tính
     if re.match(r"^(xin chào|chào|hello|hi|hey|alo|chào bạn|chào ad|cảm ơn|thank|thanks|bạn là ai|ai vậy)\b", p):
         reply = (
-            f"Chào {user_display}! 👋 Mình là **Thủ thư AI** của Hệ thống Thư viện Thông minh **SmartLib** (hiện đang quản lý **{len(books)} đầu sách**).\n\n"
-            f"Mình có thể hỗ trợ bạn ngay lập tức:\n"
-            f"- 📋 Kiểm tra **phiếu mượn, hạn trả & tiền phạt** cá nhân\n"
-            f"- 🔍 Tra cứu **tồn kho & vị trí kệ** của từng cuốn sách\n"
-            f"- 🔄 Hướng dẫn **quy trình trả sách bằng mã QR**, gia hạn, nộp phạt VNPay\n"
-            f"- 📚 Tư vấn & **gợi ý sách hay** theo chủ đề bạn yêu thích."
+            f"Dạ mình chào {user_display} ạ 😊\n\n"
+            f"Mình là **Trợ lý Thủ thư AI** của Hệ thống Thư viện Thông minh **SmartLib** (hiện đang quản lý **{len(books)} đầu sách**).\n\n"
+            f"Mình chuyên hỗ trợ các vấn đề liên quan đến tra cứu sách, kiểm tra tồn kho, phiếu mượn - trả, gia hạn và nội quy thư viện. Nếu bạn cần hỗ trợ gì về SmartLib, cứ nhắn mình bất cứ lúc nào ạ 🥰"
         )
         return reply, [], "general_greeting"
 
@@ -676,90 +928,29 @@ def handle_out_of_scope_or_general_question(
         total_copies = sum(int(b.get("quantity", 0)) for b in books)
         avail_copies = sum(int(b.get("available", b.get("available_copies", 0))) for b in books)
         reply = (
-            f"Chào {user_display}! 📊 Hiện tại kho dữ liệu **Thư viện SmartLib** đang lưu trữ:\n\n"
+            f"Dạ mình chào {user_display} ạ 😊 Hiện tại kho dữ liệu **Thư viện SmartLib** đang lưu trữ:\n\n"
             f"- 📚 **Tổng số đầu sách:** **{total_titles} đầu sách**\n"
             f"- 📦 **Tổng số bản sách nhập kho:** **{total_copies} cuốn**\n"
             f"- 🟢 **Số bản sẵn sàng cho mượn ngay:** **{avail_copies} cuốn**\n\n"
-            f"Bạn muốn tìm sách thuộc thể loại nào (Công nghệ, Kinh tế, Kỹ năng sống, Văn học...) cứ nhắn mình nhé!"
+            f"Bạn muốn tìm sách thuộc thể loại nào (Công nghệ, Kinh tế, Kỹ năng sống, Văn học...) cứ nhắn mình bất cứ lúc nào ạ 🥰"
         )
         return reply, [], "library_stats"
 
-    # 3. Nhóm câu hỏi tính toán toán học cơ bản (ví dụ: "1 + 1 bằng mấy", "25 * 4 = ?")
-    math_match = re.search(r"(\d+(?:\.\d+)?\s*[\+\-\*\/xX:]\s*\d+(?:\.\d+)?(?:\s*[\+\-\*\/]\s*\d+(?:\.\d+)?)*)", p)
-    if math_match:
-        raw_expr = math_match.group(1).replace("x", "*").replace("X", "*").replace(":", "/")
-        val = _safe_eval_math(raw_expr)
-        if val is not None:
-            formatted_val = int(val) if isinstance(val, float) and val.is_integer() else round(val, 4)
-            sci_books = [
-                {
-                    "book_id": b.get("id"),
-                    "title": b.get("title"),
-                    "author": b.get("author"),
-                    "reason": f"Sách {b.get('category')} rèn luyện tư duy logic & khoa học"
-                }
-                for b in books
-                if any(k in (b.get("category") or "").lower() for k in ["khoa học", "công nghệ", "kỹ năng"])
-            ][:2]
-            reply = (
-                f"Chào {user_display}! Kết quả phép tính **{math_match.group(1).strip()} = {formatted_val}** bạn nhé! 🧮✨\n\n"
-                f"*(Lưu ý: Mình là **Thủ thư AI chuyên trách nghiệp vụ Thư viện SmartLib**. Nếu bạn yêu thích Toán học, Tư duy Logic & Khoa học, mình gợi ý bạn tham khảo các đầu sách dưới đây trong kho thư viện nha!)*"
-            )
-            return reply, sci_books, "out_of_scope"
+    # 3. Nhóm câu hỏi NGOÀI PHẠM VI THƯ VIỆN -> Áp dụng chuẩn Form 3 đoạn (Dạ mình chào bạn ạ 😊 ...)
+    genre, topic_label, is_math = infer_topic_and_genre(user_prompt)
 
-    # 4. Nhóm câu hỏi NGOÀI PHẠM VI THƯ VIỆN (Out-of-Scope Domain Guardrail)
-    api_key_note = (
-        "\n\n🔑 *Lưu ý cấu hình AI:* Hiện hệ thống đang chạy ở chế độ **Domain Guardrail & Function Calling nội bộ** (chưa nạp `GEMINI_API_KEY` / `OPENAI_API_KEY`). "
-        "Để kích hoạt mô hình ngôn ngữ lớn (Google Gemini / OpenAI GPT) trả lời chuyên sâu mọi chủ đề mở, bạn hãy điền `GEMINI_API_KEY` vào file `.env` hoặc bấm nút ⚙️ **Cài đặt API Key** ở góc trên khung chat nhé!"
-        if not has_api_key else ""
-    )
-
-    # Nếu câu hỏi ngoài liên quan đến lập trình / công nghệ / AI -> điều hướng về sách Công nghệ
-    if any(k in p for k in ["viết code", "lập trình", "code ", "c++", "java", "javascript", "html", "sql", "thuật toán", "phần mềm"]):
-        tech_books = [
-            {
-                "book_id": b.get("id"),
-                "title": b.get("title"),
-                "author": b.get("author"),
-                "reason": "Sách chuyên ngành Công nghệ & Lập trình có sẵn tại SmartLib"
-            }
-            for b in books
-            if "công nghệ" in (b.get("category") or "").lower() or "python" in (b.get("title") or "").lower()
-        ][:3]
+    if is_math:
         reply = (
-            f"Chào {user_display}! ⚠️ Yêu cầu **\"{user_prompt}\"** thuộc nhóm giải bài tập/viết mã nguồn nằm ngoài phạm vi công cụ nghiệp vụ của **Thủ thư AI SmartLib**.\n\n"
-            f"Tuy nhiên, kho thư viện SmartLib hiện có sẵn các đầu sách **Công nghệ & Lập trình** rất hay giúp bạn nắm vững kiến thức này, bạn bấm vào thẻ sách bên dưới để mượn đọc nhé! 💻📚"
-            f"{api_key_note}"
+            f"Dạ mình chào {user_display} ạ 😊\n\n"
+            f"Mình là trợ lý chăm sóc độc giả của **Thư viện SmartLib**, nên mình chỉ hỗ trợ các vấn đề liên quan đến tra cứu sách, kiểm tra tồn kho, phiếu mượn - trả, gia hạn hay tài khoản thư viện thôi ạ *(câu hỏi này nằm ngoài phạm vi nghiệp vụ của thư viện)*.\n\n"
+            f"Còn bài toán này thì bạn có thể hỏi bạn bè hoặc dùng công cụ tính toán trên điện thoại nha. Nếu bạn muốn mình giới thiệu các đầu sách **{topic_label}** trong kho thư viện (chỉ cần nhắn **\"Đồng ý\"**), hoặc cần hỗ trợ gì về SmartLib, cứ nhắn mình bất cứ lúc nào ạ 🥰"
         )
-        return reply, tech_books, "out_of_scope"
+        return reply, [], "out_of_scope"
 
-    # Nếu câu hỏi ngoài liên quan đến giá vàng, chứng khoán, bitcoin, tiền tệ -> điều hướng về sách Kinh tế
-    if any(k in p for k in ["giá vàng", "chứng khoán", "cổ phiếu", "bitcoin", "tỷ giá", "lãi suất", "bất động sản"]):
-        econ_books = [
-            {
-                "book_id": b.get("id"),
-                "title": b.get("title"),
-                "author": b.get("author"),
-                "reason": "Sách Kinh tế & Đầu tư tài chính tại SmartLib"
-            }
-            for b in books
-            if "kinh tế" in (b.get("category") or "").lower() or "tài chính" in (b.get("title") or "").lower()
-        ][:3]
-        reply = (
-            f"Chào {user_display}! ⚠️ Câu hỏi **\"{user_prompt}\"** yêu cầu dữ liệu thị trường thời gian thực nằm ngoài phạm vi CSDL của **Thư viện SmartLib**.\n\n"
-            f"Nếu bạn quan tâm đến kiến thức **Kinh tế, Tài chính & Đầu tư**, mình gợi ý các đầu sách chuyên sâu đang có sẵn tại thư viện bên dưới nhé! 📈📚"
-            f"{api_key_note}"
-        )
-        return reply, econ_books, "out_of_scope"
-
-    # Các câu hỏi ngoài phạm vi khác (thời tiết, bóng đá, nấu ăn, giải trí, chính trị, đời sống...)
     reply = (
-        f"Chào {user_display}! ⚠️ Câu hỏi **\"{user_prompt}\"** hiện nằm ngoài phạm vi nghiệp vụ của **Thủ thư AI Thư viện SmartLib**.\n\n"
-        f"Mình được thiết kế chuyên biệt với **Chốt chặn Phạm vi (Domain Guardrail)** để hỗ trợ chính xác các nghiệp vụ thư viện:\n"
-        f"- 📖 Tra cứu sách theo tên, tác giả, thể loại & vị trí kệ\n"
-        f"- 📋 Kiểm tra phiếu mượn, hạn trả & phí phạt cá nhân\n"
-        f"- 🔄 Hướng dẫn quy trình trả sách bằng **Mã QR**, xin gia hạn, đặt trước sách và mở khóa tài khoản qua **VNPay**"
-        f"{api_key_note}"
+        f"Dạ mình chào {user_display} ạ 😊\n\n"
+        f"Mình là trợ lý chăm sóc độc giả của **Thư viện SmartLib**, nên mình chỉ hỗ trợ các vấn đề liên quan đến tra cứu sách, kiểm tra tồn kho, phiếu mượn - trả, gia hạn hay tài khoản thư viện thôi ạ *(câu hỏi này nằm ngoài phạm vi nghiệp vụ của thư viện)*.\n\n"
+        f"Còn câu hỏi này thì bạn có thể hỏi bạn bè hoặc tra cứu trên các công cụ tìm kiếm chuyên dụng nha. Nếu bạn muốn tìm hiểu thêm về **{topic_label}** qua các đầu sách trong kho SmartLib thì hãy nhắn **\"Đồng ý\"** để mình giới thiệu sách ngay, hoặc nếu cần hỗ trợ gì về SmartLib, cứ nhắn mình bất cứ lúc nào ạ 🥰"
     )
     return reply, [], "out_of_scope"
 
@@ -919,18 +1110,22 @@ def _call_gemini_function_calling(
     db: dict,
     user_id: Optional[int],
     user_name: Optional[str],
-    explicit_user_key: bool = False
+    explicit_user_key: bool = False,
+    session_turns: Optional[List[Dict[str, Any]]] = None
 ) -> tuple[str, Optional[dict], list]:
     """
-    Thực thi Function Calling 5 bước trên Google Gemini API (gemini-3.8-flash / gemini-2.5-flash / gemini-2.0-flash).
-    Hỗ trợ cả khóa API bắt đầu bằng 'AQ.' (Vertex AI / Google Cloud API Key) và 'AIza...' (Google AI Studio).
+    Thực thi Function Calling 5 bước trên Google Gemini API (gemini-3.8-flash / gemini-3.5-flash-lite).
+    Truyền kèm bộ nhớ lịch sử phiên trò chuyện (session_turns) để AI ghi nhớ xuyên suốt ngữ cảnh.
     Trả về (final_reply, tool_call_meta, suggested_books).
     """
     system_instruction = (
-        "Bạn là Thủ thư AI thân thiện, chuyên nghiệp của Hệ thống Thư viện Thông minh SmartLib (Trường ĐH CNTT & Truyền thông - ICTU). "
+        "Bạn là trợ lý chăm sóc độc giả của Thư viện SmartLib (Trường ĐH CNTT & Truyền thông - ICTU). "
         "Nhiệm vụ chính: Hỗ trợ độc giả tìm kiếm sách, kiểm tra tồn kho, tra cứu phiếu mượn cá nhân, giải đáp nội quy thư viện (hạn mượn 14 ngày, phạt 2.000đ/ngày, khóa tài khoản khi quá hạn >= 3 ngày, nộp phạt VNPay, trả sách bằng mã QR tại quầy). "
-        "Khi độc giả hỏi dữ liệu cụ thể, BẮT BUỘC gọi Function/Tool tương ứng. "
-        "Nếu độc giả hỏi câu hỏi ngoài phạm vi thư viện (ví dụ: toán học, thời tiết, lập trình, đời sống...), hãy trả lời ngắn gọn, chính xác, lịch sự trong 2-3 câu, nêu rõ câu hỏi nằm ngoài phạm vi nghiệp vụ chính của thư viện và khéo léo gợi ý họ khám phá kho sách của SmartLib."
+        "Khi độc giả hỏi dữ liệu cụ thể hoặc xác nhận 'Đồng ý' gợi ý sách từ câu trước, BẮT BUỘC gọi Function/Tool tương ứng. "
+        "Nếu độc giả hỏi câu hỏi ngoài phạm vi thư viện (ví dụ: toán học, thời tiết, nhân vật lịch sử, đời sống...), BẮT BUỘC trả lời theo đúng Form 3 đoạn sau:\n"
+        "Đoạn 1: Dạ mình chào bạn ạ 😊\n"
+        "Đoạn 2: Mình là trợ lý chăm sóc độc giả của Thư viện SmartLib, nên mình chỉ hỗ trợ các vấn đề liên quan đến tra cứu sách, kiểm tra tồn kho, phiếu mượn - trả, gia hạn hay tài khoản thư viện thôi ạ (câu hỏi này nằm ngoài phạm vi nghiệp vụ của thư viện).\n"
+        "Đoạn 3: Còn bài toán/câu hỏi này thì bạn có thể hỏi bạn bè hoặc dùng công cụ tính toán/tìm kiếm trên điện thoại nha. Nếu bạn muốn tìm hiểu thêm về chủ đề này qua các đầu sách trong kho SmartLib thì hãy nhắn 'Đồng ý' để mình giới thiệu sách ngay, hoặc nếu cần hỗ trợ gì về SmartLib, cứ nhắn mình bất cứ lúc nào ạ 🥰"
     )
 
     configured_model = (os.getenv("AI_MODEL") or "gemini-3.8-flash").strip()
@@ -939,16 +1134,20 @@ def _call_gemini_function_calling(
         if m and m not in candidate_models:
             candidate_models.append(m)
 
+    contents_payload = []
+    if session_turns:
+        for turn in session_turns[-6:]:
+            role = "user" if turn.get("role") == "user" else "model"
+            text_val = (turn.get("content") or "").strip()
+            if text_val:
+                contents_payload.append({"role": role, "parts": [{"text": text_val}]})
+    contents_payload.append({"role": "user", "parts": [{"text": user_prompt}]})
+
     payload = {
         "system_instruction": {
             "parts": [{"text": system_instruction}]
         },
-        "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": user_prompt}]
-            }
-        ],
+        "contents": contents_payload,
         "tools": [
             {
                 "function_declarations": READER_FUNCTION_DEFINITIONS
@@ -1033,6 +1232,7 @@ class ReaderChatRequest(BaseModel):
     userId: Optional[int] = None
     userName: Optional[str] = None
     role: Optional[str] = "Reader"
+    sessionId: Optional[str] = None
     history: Optional[List[Dict[str, Any]]] = None
     apiKey: Optional[str] = None
     provider: Optional[str] = "gemini"
@@ -1043,8 +1243,8 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
     """
     Endpoint Chatbot Độc giả ứng dụng Mô hình 2: Function Calling (Tool Calling):
     - Kiểm soát chặt chẽ các trường hợp biên (Rỗng, Quá ngắn/Ký tự đặc biệt, Quá dài > 1000 ký tự, SQL/Prompt Injection, API Key sai).
-    - Hỗ trợ Google Gemini 3.8 Flash ('AQ...' / 'AIza...') & OpenAI GPT-4o-mini ('sk-...') Function Calling.
-    - Kiểm soát câu hỏi ngoài phạm vi (Out-of-Scope Guardrail) chuẩn xác.
+    - Có bộ nhớ riêng cho từng phiên trò chuyện (Per-Session Memory qua sessionId & history).
+    - Câu hỏi ngoài phạm vi luôn sử dụng Form CSKH 3 đoạn chuẩn mực.
     """
     user_prompt = (req.message or "").strip()
 
@@ -1056,6 +1256,38 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
     api_key = validate_api_key_format(req.apiKey)
 
     db = db_manager.load_db()
+    session_key = get_session_key(req.sessionId, req.userId)
+    session_state = get_or_sync_session_state(session_key, req.history)
+    inferred_genre, inferred_topic_label, _ = infer_topic_and_genre(user_prompt)
+
+    # Bước 3: Kiểm tra bộ nhớ phiên xem độc giả có đang trả lời nối tiếp ("Đồng ý", "OK", "Cuốn đó còn không"...)
+    followup_resolved = resolve_followup_with_session_memory(
+        user_prompt=user_prompt,
+        session_state=session_state,
+        db=db,
+        user_id=req.userId,
+        user_name=req.userName
+    )
+    if followup_resolved:
+        final_reply, tool_call_meta, suggested_books, intent_name = followup_resolved
+        save_turn_to_session(
+            session_key=session_key,
+            user_prompt=user_prompt,
+            ai_reply=final_reply,
+            intent_name=intent_name,
+            suggested_books=suggested_books
+        )
+        return {
+            "success": True,
+            "answer": final_reply,
+            "tool_call": tool_call_meta,
+            "suggested_books": suggested_books,
+            "intent": intent_name,
+            "session_id": session_key,
+            "has_api_key": bool(api_key),
+            "timestamp": datetime.now().strftime("%H:%M")
+        }
+
     tool_call_meta = None
     final_reply = ""
     suggested_books = []
@@ -1072,17 +1304,17 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
                 db=db,
                 user_id=req.userId,
                 user_name=req.userName,
-                explicit_user_key=explicit_user_key
+                explicit_user_key=explicit_user_key,
+                session_turns=session_state.get("turns", [])
             )
             if tool_call_meta:
                 intent_name = tool_call_meta["name"]
             elif final_reply:
-                # Nếu Gemini trả lời văn bản trực tiếp (không gọi Tool), kiểm tra xem có phải câu hỏi nghiệp vụ hoặc ngoài phạm vi
                 heuristic_call = semantic_heuristic_function_caller(user_prompt, req.userId, db)
                 if heuristic_call:
-                    # Ưu tiên thực thi Tool CSDL thật để đảm bảo số liệu chính xác 100%
                     final_reply = ""
                 else:
+                    # Đảm bảo câu hỏi ngoài phạm vi luôn trả về chuẩn Form 3 đoạn CSKH
                     oos_reply, oos_books, oos_intent = handle_out_of_scope_or_general_question(
                         user_prompt=user_prompt,
                         user_name=req.userName,
@@ -1090,13 +1322,8 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
                         has_api_key=True
                     )
                     intent_name = oos_intent
-                    if not suggested_books and oos_books:
-                        suggested_books = oos_books
-                    if oos_intent == "out_of_scope" and "ngoài phạm vi" not in final_reply.lower():
-                        final_reply = (
-                            f"{final_reply}\n\n"
-                            f"*(Lưu ý: Câu hỏi nằm ngoài phạm vi nghiệp vụ CSDL Thư viện SmartLib — Thủ thư AI hỗ trợ giải đáp qua mô hình Gemini 3.8 Flash)*"
-                        )
+                    final_reply = oos_reply
+                    suggested_books = oos_books
         except HTTPException:
             raise
         except Exception as ex:
@@ -1112,15 +1339,14 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
                 for fn in READER_FUNCTION_DEFINITIONS
             ]
             system_prompt = (
-                "Bạn là Thủ thư AI thân thiện, thông minh của Thư viện SmartLib dành cho Độc giả. "
+                "Bạn là trợ lý chăm sóc độc giả của Thư viện SmartLib. "
                 "Nhiệm vụ: Hỗ trợ tìm kiếm sách, kiểm tra số lượng tồn kho, tra cứu sách mượn của độc giả, giải đáp quy định thư viện. "
-                "Khi độc giả cần thông tin dữ liệu cụ thể, hãy gọi Tool tương ứng thay vì tự đoán dữ liệu. "
-                "Nếu câu hỏi nằm ngoài phạm vi thư viện, hãy trả lời ngắn gọn, lịch sự và gợi ý sách liên quan."
+                "Khi độc giả cần thông tin dữ liệu cụ thể, hãy gọi Tool tương ứng thay vì tự đoán dữ liệu."
             )
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
+            messages = [{"role": "system", "content": system_prompt}]
+            for turn in session_state.get("turns", [])[-6:]:
+                messages.append({"role": turn.get("role", "user"), "content": turn.get("content", "")})
+            messages.append({"role": "user", "content": user_prompt})
 
             payload = {
                 "model": "gpt-4o-mini",
@@ -1160,7 +1386,7 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
                         fn_name, fn_args, tool_result, req.userName
                     )
                 else:
-                    final_reply = res_message.get("content", "")
+                    final_reply = ""
         except urllib.error.HTTPError as http_err:
             if http_err.code in (401, 403) and explicit_user_key:
                 raise HTTPException(
@@ -1195,7 +1421,7 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
                 fn_name, fn_args, tool_result, req.userName
             )
         else:
-            # Xử lý chuẩn xác câu hỏi ngoài phạm vi (Out-of-Scope Guardrail) hoặc hội thoại chung
+            # Xử lý chuẩn xác câu hỏi ngoài phạm vi theo Form CSKH 3 đoạn hoặc hội thoại chung
             final_reply, suggested_books, intent_name = handle_out_of_scope_or_general_question(
                 user_prompt=user_prompt,
                 user_name=req.userName,
@@ -1203,12 +1429,24 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
                 has_api_key=bool(api_key)
             )
 
+    # Bước 4: Lưu lượt hội thoại hiện tại vào bộ nhớ riêng của phiên (Per-Session Memory)
+    save_turn_to_session(
+        session_key=session_key,
+        user_prompt=user_prompt,
+        ai_reply=final_reply,
+        intent_name=intent_name,
+        suggested_books=suggested_books,
+        inferred_genre=inferred_genre if intent_name == "out_of_scope" else None,
+        inferred_topic_label=inferred_topic_label if intent_name == "out_of_scope" else None
+    )
+
     return {
         "success": True,
         "answer": final_reply,
         "tool_call": tool_call_meta,
         "suggested_books": suggested_books,
         "intent": intent_name,
+        "session_id": session_key,
         "has_api_key": bool(api_key),
         "timestamp": datetime.now().strftime("%H:%M")
     }

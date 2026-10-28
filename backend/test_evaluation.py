@@ -244,7 +244,7 @@ class SmartLibEvaluationTestSuite(unittest.TestCase):
         self.assertEqual(data_oos.get("intent"), "out_of_scope")
         self.assertIn("ngoài phạm vi", data_oos.get("answer", "").lower())
 
-        # 3. Trên Reader Chat: Hỏi phép tính toán học "25 * 4 bằng mấy?" -> Tính đúng = 100 và gắn intent = 'out_of_scope'
+        # 3. Trên Reader Chat: Hỏi phép tính toán học "25 * 4 bằng mấy?" -> Trả về Form CSKH 3 đoạn và gắn intent = 'out_of_scope'
         res_math = self.client.post(
             "/api/ai/reader-chat",
             json={"message": "Cho hỏi 25 * 4 bằng mấy?"}
@@ -252,7 +252,8 @@ class SmartLibEvaluationTestSuite(unittest.TestCase):
         self.assertEqual(res_math.status_code, 200)
         data_math = res_math.json()
         self.assertEqual(data_math.get("intent"), "out_of_scope")
-        self.assertIn("100", data_math.get("answer", ""))
+        self.assertIn("bài toán này", data_math.get("answer", "").lower())
+        self.assertIn("dạ mình chào", data_math.get("answer", "").lower())
 
     def test_16_boundary_image_empty_tiny_and_over_10mb(self):
         """[TC-B05] Kiểm thử Biên Ảnh bìa AI Cataloging: Rỗng (0B), Quá nhỏ (5x5px), Quá lớn (10MB + 1B) -> HTTP 400"""
@@ -325,9 +326,52 @@ class SmartLibEvaluationTestSuite(unittest.TestCase):
             if old_openai is not None:
                 os.environ["OPENAI_API_KEY"] = old_openai
 
+    def test_19_session_memory_multi_turn_conversation(self):
+        """[TC-B08] Kiểm thử Bộ nhớ theo Phiên (Per-Session Memory): Hỏi Chu Du / Tam Quốc -> Nhắn 'Đồng ý' -> AI nhớ ngữ cảnh và gợi ý sách"""
+        session_a = "test_sess_tam_quoc_01"
+        session_b = "test_sess_code_02"
+
+        # Lượt 1 (Phiên A): Hỏi câu ngoài phạm vi về Chu Du (lịch sử Tam Quốc)
+        r1 = self.client.post(
+            "/api/ai/reader-chat",
+            json={"message": "Biết Chu Du là ai không", "sessionId": session_a}
+        )
+        self.assertEqual(r1.status_code, 200)
+        d1 = r1.json()
+        self.assertEqual(d1.get("intent"), "out_of_scope")
+        self.assertIn("dạ mình chào", d1.get("answer", "").lower())
+
+        # Lượt 1 (Phiên B độc lập): Hỏi câu ngoài phạm vi về lập trình C++
+        r_b1 = self.client.post(
+            "/api/ai/reader-chat",
+            json={"message": "Viết code C++ giải phương trình", "sessionId": session_b}
+        )
+        self.assertEqual(r_b1.status_code, 200)
+
+        # Lượt 2 (Phiên A): Nhắn "Đồng ý" -> AI phải nhớ Phiên A đang nói về lịch sử/văn học (không bị lẫn với Phiên B)
+        r2 = self.client.post(
+            "/api/ai/reader-chat",
+            json={"message": "Đồng ý", "sessionId": session_a}
+        )
+        self.assertEqual(r2.status_code, 200)
+        d2 = r2.json()
+        self.assertEqual(d2.get("intent"), "recommend_books")
+        self.assertTrue(len(d2.get("suggested_books", [])) > 0)
+        self.assertIn("lịch sử", d2.get("answer", "").lower())
+
+        # Lượt 2 (Phiên B): Nhắn "Đồng ý" -> AI nhớ Phiên B đang nói về Công nghệ & Lập trình
+        r_b2 = self.client.post(
+            "/api/ai/reader-chat",
+            json={"message": "Đồng ý", "sessionId": session_b}
+        )
+        self.assertEqual(r_b2.status_code, 200)
+        d_b2 = r_b2.json()
+        self.assertEqual(d_b2.get("intent"), "recommend_books")
+        self.assertIn("công nghệ", d_b2.get("answer", "").lower())
+
 
 if __name__ == "__main__":
     print("=" * 75)
-    print("CHẠY BỘ KIỂM THỬ THỰC NGHIỆM SMARTLIB (18 KỊCH BẢN ĐÚNG - SAI - BIÊN)")
+    print("CHẠY BỘ KIỂM THỬ THỰC NGHIỆM SMARTLIB (19 KỊCH BẢN ĐÚNG - SAI - BIÊN & BỘ NHỚ PHIÊN)")
     print("=" * 75)
     unittest.main(verbosity=2)

@@ -18,6 +18,7 @@ const THINKING_MESSAGES = [
 
 export default function AIChatWidget({ books = [] }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [sessionId, setSessionId] = useState(() => `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
   const [messages, setMessages] = useState([
     {
       id: 1,
@@ -92,7 +93,8 @@ export default function AIChatWidget({ books = [] }) {
     setIsThinking(true);
 
     try {
-      const reply = await askLibraryAI(userMsg.text, books);
+      const historyPayload = messages.filter(m => m.id !== 1).slice(-10).map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text, intent: m.intent || null, suggested_books: m.suggested_books || [] }));
+      const reply = await askLibraryAI(userMsg.text, books, historyPayload, sessionId);
       const isObj = typeof reply === 'object' && reply !== null;
       const aiMsg = {
         id: Date.now() + 1,
@@ -135,6 +137,7 @@ export default function AIChatWidget({ books = [] }) {
   };
 
   const handleClearHistory = () => {
+    setSessionId(`sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
     setMessages([
       {
         id: Date.now(),
