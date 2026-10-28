@@ -10,6 +10,11 @@ import os
 import sys
 import json
 import random
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
@@ -23,6 +28,42 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from database import db_manager
+from fastapi import APIRouter, HTTPException
+
+router = APIRouter(prefix='/api/ai', tags=['AI Predictive Analysis'])
+
+@router.get('/procurement-forecast')
+def get_procurement_forecast():
+    predictor = DemandPredictor()
+    records = []
+    try:
+        eng = predictor.engine
+        if eng:
+            with eng.connect() as conn:
+                res = conn.execute(text('SELECT * FROM ai_procurement ORDER BY id DESC LIMIT 5')).fetchall()
+                for row in res:
+                    d = dict(row._mapping)
+                    for k, v in d.items():
+                        if hasattr(v, 'isoformat'):
+                            d[k] = v.isoformat()
+                        elif isinstance(v, (int, float, str, bool)) or v is None:
+                            pass
+                        else:
+                            d[k] = str(v)
+                    records.append(d)
+    except Exception as e:
+        print(f'Error fetching procurement records: {e}')
+    if not records:
+        df = predictor.run_prediction_pipeline()
+        records = df.to_dict(orient='records')
+    return {'success': True, 'data': records}
+
+@router.post('/procurement-forecast/run')
+def trigger_procurement_forecast():
+    predictor = DemandPredictor()
+    df = predictor.run_prediction_pipeline()
+    records = df.to_dict(orient='records')
+    return {'success': True, 'data': records}
 
 
 class DemandPredictor:

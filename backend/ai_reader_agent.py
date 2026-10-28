@@ -216,23 +216,35 @@ def validate_api_key_format(explicit_api_key: Optional[str]) -> Optional[str]:
 def execute_search_books(db: dict, keyword: str = "", category: str = "", author: str = "") -> dict:
     books = db.get("books", [])
     kw = (keyword or "").lower().strip()
+    kw_raw = remove_accents(kw)
     cat = (category or "").lower().strip()
+    cat_raw = remove_accents(cat)
     auth = (author or "").lower().strip()
+    auth_raw = remove_accents(auth)
 
     matched = []
     for b in books:
         title = (b.get("title") or "").lower()
+        title_raw = remove_accents(title)
         desc = (b.get("desc") or b.get("description") or "").lower()
+        desc_raw = remove_accents(desc)
         b_cat = (b.get("category") or "").lower()
+        b_cat_raw = remove_accents(b_cat)
         b_auth = (b.get("author") or "").lower()
+        b_auth_raw = remove_accents(b_auth)
 
         match = True
-        if kw and (kw not in title and kw not in desc and kw not in b_auth and kw not in b_cat):
-            match = False
-        if cat and (cat not in b_cat):
-            match = False
-        if auth and (auth not in b_auth):
-            match = False
+        if kw:
+            has_kw = (kw in title or kw in desc or kw in b_auth or kw in b_cat or
+                      kw_raw in title_raw or kw_raw in desc_raw or kw_raw in b_auth_raw or kw_raw in b_cat_raw)
+            if not has_kw:
+                match = False
+        if cat:
+            if cat not in b_cat and cat_raw not in b_cat_raw:
+                match = False
+        if auth:
+            if auth not in b_auth and auth_raw not in b_auth_raw:
+                match = False
 
         if match:
             matched.append({
@@ -257,9 +269,11 @@ def execute_check_availability(db: dict, book_title: str) -> dict:
     target = (book_title or "").lower().strip()
     found = []
 
+    target_raw = remove_accents(target)
     for b in books:
         title = (b.get("title") or "").lower()
-        if target and (target in title or title in target):
+        title_raw = remove_accents(title)
+        if target and (target in title or title in target or target_raw in title_raw or title_raw in target_raw):
             cat = b.get("category", "")
             shelf = "Khu A - Kệ 01 (Tầng 1)"
             if "Công nghệ" in cat or "Khoa học" in cat:
@@ -479,18 +493,43 @@ def run_tool(name: str, arguments: dict, db: dict, user_id: Optional[int], user_
 # =========================================================================
 # 4. BỘ SUY DIỄN NGỮ NGHĨA FUNCTION CALLING & KIỂM SOÁT CÂU HỎI NGOÀI
 # =========================================================================
+import unicodedata
+
+def remove_accents(text: str) -> str:
+    if not text:
+        return ""
+    text = str(text).replace("đ", "d").replace("Đ", "D")
+    nfkd = unicodedata.normalize('NFKD', text)
+    return "".join([c for c in nfkd if not unicodedata.combining(c)]).lower()
 
 def semantic_heuristic_function_caller(user_prompt: str, user_id: Optional[int], db: Optional[dict] = None) -> Optional[dict]:
     """
-    Phân tích ngữ nghĩa tiếng Việt để ánh xạ vào đúng Function Calling của Thư viện.
-    Nếu câu hỏi nằm ngoài phạm vi 5 công cụ CSDL, trả về None để bộ xử lý Out-of-Scope đảm nhiệm.
+    Phân tích ngữ nghĩa tiếng Việt đa dạng (có dấu, không dấu, teen-code, viết tắt, từ đồng nghĩa)
+    để ánh xạ chính xác vào đúng 5 Function Calling của Thư viện SmartLib:
+    1. get_my_active_borrows: Sách đang mượn, hạn trả, quá hạn, tiền phạt cá nhân của độc giả.
+    2. get_library_policy: Hướng dẫn mượn, quy định, nội quy, giờ mở cửa, đền bù, gia hạn, VNPay.
+    3. check_book_availability: Kiểm tra tồn kho, số lượng còn, vị trí kệ sách của cuốn sách cụ thể.
+    4. recommend_books: Gợi ý sách theo thể loại, chủ đề (Văn học, Kinh tế, Công nghệ, Kỹ năng...).
+    5. search_books: Tìm kiếm sách theo từ khóa tên sách hoặc tác giả.
     """
     p = user_prompt.lower().strip()
+    p_raw = remove_accents(p)
 
-    # 1. Tra cứu sách cá nhân đang mượn
-    if any(k in p for k in ["mượn gì", "đang mượn", "hạn trả", "sách của tôi", "phiếu mượn của tôi", "phiếu mượn", "quá hạn của tôi", "tiền phạt cá nhân", "danh sách mượn"]):
+    # 1. Tra cứu sách cá nhân đang mượn, quá hạn cá nhân & tiền phạt của độc giả
+    personal_borrow_triggers = [
+        "mượn gì", "muon gi", "đang mượn", "dang muon", "hạn trả", "han tra",
+        "sách của tôi", "sach cua toi", "phiếu mượn của tôi", "phieu muon cua toi",
+        "phiếu mượn", "phieu muon", "danh sách mượn", "danh sach muon",
+        "quá hạn của tôi", "qua han cua toi", "sách quá hạn không", "sach qua han khong",
+        "có quá hạn không", "co qua han khong", "tôi có sách quá hạn", "toi co sach qua han",
+        "tiền phạt của tôi", "tien phat cua toi", "tôi bị phạt bao nhiêu", "toi bi phat bao nhieu",
+        "tôi bị phạt", "toi bi phat", "tôi có bị phạt", "toi co bi phat", "phạt của tôi", "phat cua toi",
+        "nợ tiền phạt của tôi", "tiền phạt cá nhân", "tien phat ca nhan",
+        "tôi nợ phạt", "toi no phat", "tôi có bị phạt không", "toi co bi phat khong"
+    ]
+    if any(k in p or k in p_raw for k in personal_borrow_triggers):
         status_flt = "Tất cả"
-        if "chỉ chờ duyệt" in p:
+        if "chờ duyệt" in p or "cho duyet" in p_raw:
             status_flt = "Chờ duyệt"
         return {
             "function": "get_my_active_borrows",
@@ -499,13 +538,17 @@ def semantic_heuristic_function_caller(user_prompt: str, user_id: Optional[int],
             }
         }
 
-    # 2. Tra cứu quy chế, nội quy, giờ mở cửa, khóa tài khoản, mất sách, VNPay, đặt trước
-    if any(k in p for k in [
-        "quy định", "nội quy", "hạn mượn", "thời hạn", "bao lâu", "tối đa mấy cuốn",
-        "trả sách", "phạt", "gia hạn", "mã qr", "mở cửa", "mấy giờ", "địa chỉ", "liên hệ",
-        "số điện thoại", "hotline", "email", "mất sách", "rách sách", "hư hỏng", "đền bù",
-        "bị khóa", "mở khóa", "vnpay", "thanh toán phạt", "đặt trước", "hàng chờ", "giữ sách"
-    ]):
+    # 2. Hướng dẫn cách mượn & Tra cứu quy chế, nội quy, giờ mở cửa, khóa tài khoản, mất sách, VNPay
+    policy_triggers = [
+        "làm sao để mượn", "lam sao de muon", "cách mượn sách", "cach muon sach", "hướng dẫn mượn", "huong dan muon",
+        "mượn sách như thế nào", "muon sach nhu the nao", "quy trình mượn", "quy trinh muon",
+        "quy định", "quy dinh", "nội quy", "noi quy", "hạn mượn", "han muon", "thời hạn", "thoi han",
+        "bao lâu", "bao lau", "tối đa", "toi da", "mấy cuốn", "may cuon", "trả sách", "tra sach",
+        "phạt", "phat", "gia hạn", "gia han", "mã qr", "ma qr", "mở cửa", "mo cua", "mấy giờ", "may gio",
+        "địa chỉ", "dia chi", "liên hệ", "lien he", "mất sách", "mat sach", "bị khóa", "bi khoa",
+        "vnpay", "đặt trước", "dat truoc", "hàng chờ", "hang cho", "giữ sách", "giu sach"
+    ]
+    if any(k in p or k in p_raw for k in policy_triggers):
         topic = "all"
         if any(k in p for k in ["mở cửa", "mấy giờ", "địa chỉ", "liên hệ", "số điện thoại", "hotline", "email", "ở đâu"]) and not any(k in p for k in ["cuốn", "sách"]):
             topic = "opening_hours"
@@ -519,7 +562,7 @@ def semantic_heuristic_function_caller(user_prompt: str, user_id: Optional[int],
             topic = "qr_return_process"
         elif any(k in p for k in ["hạn mượn", "bao lâu", "thời hạn", "mấy ngày"]):
             topic = "due_dates"
-        elif any(k in p for k in ["tối đa", "mấy cuốn", "hạn mức"]):
+        elif any(k in p for k in ["làm sao để mượn", "cách mượn", "hướng dẫn mượn", "mượn như thế nào", "tối đa", "mấy cuốn", "hạn mức"]):
             topic = "borrow_limits"
         elif any(k in p for k in ["phạt", "tiền phạt", "trễ hạn"]):
             topic = "fine_policy"
@@ -533,15 +576,42 @@ def semantic_heuristic_function_caller(user_prompt: str, user_id: Optional[int],
             }
         }
 
-    # 3. Kiểm tra tình trạng kho / số lượng còn của cuốn sách cụ thể
-    if any(k in p for k in ["còn không", "còn bao nhiêu", "còn sách", "sẵn sàng", "kệ nào", "vị trí", "còn mấy cuốn"]):
+    # 3. Phím tắt thể loại sách: Độc giả gõ nhanh tên thể loại (vd: "sách văn học", "kinh tế", "công nghệ")
+    category_shortcut_map = {
+        "văn học": "Văn học", "van hoc": "Văn học", "tiểu thuyết": "Văn học", "tieu thuyet": "Văn học", "truyện": "Văn học",
+        "kinh tế": "Kinh tế", "kinh te": "Kinh tế", "kinh doanh": "Kinh tế", "tài chính": "Kinh tế", "tai chinh": "Kinh tế",
+        "công nghệ": "Công nghệ", "cong nghe": "Công nghệ", "lập trình": "Công nghệ", "lap trinh": "Công nghệ", "cntt": "Công nghệ", "ai": "Công nghệ",
+        "kỹ năng": "Kỹ năng sống", "ky nang": "Kỹ năng sống", "tâm lý": "Kỹ năng sống", "tam ly": "Kỹ năng sống", "phát triển bản thân": "Kỹ năng sống",
+        "lịch sử": "Lịch sử", "lich su": "Lịch sử", "khoa học": "Khoa học", "khoa hoc": "Khoa học",
+        "manga": "Manga & Shounen", "comic": "Manga & Shounen", "anime": "Manga & Shounen"
+    }
+    clean_cat_query = re.sub(r"^(?:sách|sach|thể loại|the loai|mảng|chủ đề|chu de)\s+", "", p_raw).strip(" .,?!~-")
+    if clean_cat_query in category_shortcut_map:
+        return {
+            "function": "recommend_books",
+            "arguments": {
+                "genre": category_shortcut_map[clean_cat_query],
+                "limit": 3
+            }
+        }
+
+    # 4. Kiểm tra tình trạng kho / số lượng còn của cuốn sách cụ thể
+    avail_triggers = ["còn không", "con khong", "còn bao nhiêu", "con bao nhieu", "còn sách", "con sach",
+                      "sẵn sàng", "san sang", "kệ nào", "ke nao", "vị trí", "vi tri", "còn mấy cuốn", "con may cuon"]
+    if any(k in p or k in p_raw for k in avail_triggers):
         book_title = ""
         if db:
             for book in db.get("books", []):
                 bt = (book.get("title") or "").strip()
-                if bt and len(bt) >= 3 and bt.lower() in p:
-                    book_title = bt
-                    break
+                bt_raw = remove_accents(bt)
+                if bt and len(bt) >= 3:
+                    if bt.lower() in p or (len(bt_raw) >= 3 and bt_raw in p_raw):
+                        book_title = bt
+                        break
+                    clean_bt = re.split(r"[:\-\(\[]", bt_raw)[0].strip()
+                    if clean_bt and len(clean_bt) >= 4 and clean_bt in p_raw:
+                        book_title = bt
+                        break
 
         if not book_title:
             quote_match = re.search(r'["\']([^"\']+)["\']', user_prompt)
@@ -552,15 +622,22 @@ def semantic_heuristic_function_caller(user_prompt: str, user_id: Optional[int],
             m = re.search(r'(?:sách|cuốn|tác phẩm)\s+([a-zA-Z0-9\sàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệđìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]+)', user_prompt, re.IGNORECASE)
             if m:
                 extracted = m.group(1).strip()
-                for stop in ["còn không", "còn bao nhiêu", "còn trong kho", "ở đâu", "không bạn", "vậy bạn", "hiện", "trong kho và", "còn mấy cuốn"]:
-                    extracted = re.sub(rf"\b{stop}\b", "", extracted, flags=re.IGNORECASE).strip()
-                book_title = extracted
-
-        if not book_title:
-            for sample in ["tru tiên", "python", "đắc nhân tâm", "dế mèn", "nhà giả kim", "giận"]:
-                if sample in p:
-                    book_title = sample.title()
-                    break
+                for stop in [
+                    "còn không", "con khong", "còn bao nhiêu", "con bao nhieu", "còn trong kho", "con trong kho",
+                    "ở đâu", "o dau", "không bạn", "khong ban", "vậy bạn", "vay ban", "hiện", "hien",
+                    "trong kho và", "còn mấy cuốn", "con may cuon", "cuốn", "cuon", "sách", "sach"
+                ]:
+                    extracted = re.sub(rf"(?i)\b{re.escape(stop)}\b", "", extracted).strip()
+                if db and extracted:
+                    ext_raw = remove_accents(extracted)
+                    for book in db.get("books", []):
+                        bt = (book.get("title") or "").strip()
+                        bt_raw = remove_accents(bt)
+                        if ext_raw and (ext_raw in bt_raw or bt_raw in ext_raw or ext_raw in bt.lower()):
+                            book_title = bt
+                            break
+                if not book_title:
+                    book_title = extracted
 
         if book_title:
             return {
@@ -570,18 +647,21 @@ def semantic_heuristic_function_caller(user_prompt: str, user_id: Optional[int],
                 }
             }
 
-    # 4. Gợi ý sách theo chủ đề
-    if any(k in p for k in ["gợi ý", "đề xuất", "sách hay", "tư vấn", "nên đọc", "hot nhất"]):
+    # 5. Gợi ý sách theo chủ đề (hỗ trợ cả tiếng Việt và tiếng Anh)
+    if any(k in p or k in p_raw for k in [
+        "gợi ý", "goi y", "đề xuất", "de xuat", "sách hay", "sach hay", "tư vấn", "tu van", "nên đọc", "nen doc", "hot nhất", "hot nhat",
+        "recommend", "suggest", "good books", "best books", "book recommendation"
+    ]):
         genre = "Chung"
-        if any(k in p for k in ["phát triển bản thân", "kỹ năng", "tư duy", "tâm lý"]):
+        if any(k in p or k in p_raw for k in ["phát triển bản thân", "phat trien ban than", "kỹ năng", "ky nang", "tư duy", "tu duy", "tâm lý", "tam ly"]):
             genre = "Kỹ năng sống"
-        elif any(k in p for k in ["lập trình", "công nghệ", "ai", "cntt", "python", "khoa học"]):
+        elif any(k in p or k in p_raw for k in ["lập trình", "lap trinh", "công nghệ", "cong nghe", "ai", "cntt", "python", "khoa học", "khoa hoc"]):
             genre = "Công nghệ"
-        elif any(k in p for k in ["kinh tế", "kinh doanh", "làm giàu", "tài chính", "đầu tư"]):
+        elif any(k in p or k in p_raw for k in ["kinh tế", "kinh te", "kinh doanh", "làm giàu", "lam giau", "tài chính", "tai chinh", "đầu tư", "dau tu"]):
             genre = "Kinh tế"
-        elif any(k in p for k in ["văn học", "tiểu thuyết", "truyện"]):
+        elif any(k in p or k in p_raw for k in ["văn học", "van hoc", "tiểu thuyết", "tieu thuyet", "truyện", "truyen"]):
             genre = "Văn học"
-        elif any(k in p for k in ["lịch sử"]):
+        elif any(k in p or k in p_raw for k in ["lịch sử", "lich su"]):
             genre = "Lịch sử"
 
         return {
@@ -592,26 +672,102 @@ def semantic_heuristic_function_caller(user_prompt: str, user_id: Optional[int],
             }
         }
 
-    # 5. Tìm kiếm sách theo tên sách, tác giả hoặc thể loại có thực trong CSDL
+    # 6. Tìm kiếm sách theo tên sách, tác giả hoặc từ khóa có thực trong CSDL (hỗ trợ cả có dấu, không dấu, viết tắt)
     if db:
+        clean_p_term = p_raw.strip(" .,?!~-")
         for book in db.get("books", []):
             bt = (book.get("title") or "").strip()
             ba = (book.get("author") or "").strip()
-            if bt and len(bt) >= 4 and bt.lower() in p:
-                return {
-                    "function": "check_book_availability",
-                    "arguments": {"book_title": bt}
-                }
-            if ba and len(ba) >= 4 and ba.lower() in p:
+            bt_raw = remove_accents(bt)
+            ba_raw = remove_accents(ba)
+            if bt and len(bt) >= 3:
+                if bt.lower() in p or (len(bt_raw) >= 3 and bt_raw in p_raw) or (len(clean_p_term) >= 4 and clean_p_term in bt_raw):
+                    return {
+                        "function": "check_book_availability",
+                        "arguments": {"book_title": bt}
+                    }
+            if ba and len(ba) >= 3 and (ba.lower() in p or (len(ba_raw) >= 3 and ba_raw in p_raw)):
                 return {
                     "function": "search_books",
                     "arguments": {"author": ba}
                 }
 
-    if any(k in p for k in ["tìm sách", "tra cứu sách", "có sách nào", "tác giả", "thể loại sách"]):
+    # Bắt tất cả ý định tìm sách, kiếm sách, mượn sách, chọn sách, sách hay (cả có dấu & không dấu, teen-code)
+    book_search_triggers = [
+        "tìm sách", "tim sach", "kiếm sách", "kiem sach", "tra cứu sách", "tra cuu sach",
+        "muốn tìm", "muon tim", "muốn kiếm", "muon kiem", "tìm kiếm", "tim kiem",
+        "cần tìm", "can tim", "cần kiếm", "can kiem", "muốn mượn", "muon muon",
+        "đọc sách", "doc sach", "mượn sách", "muon sach", "xem sách", "xem sach",
+        "sách gì", "sach gi", "có sách", "co sach", "sách nào", "sach nao",
+        "cuốn sách nào", "cuon sach nao", "sách hay", "sach hay", "chọn sách", "chon sach",
+        "thư viện có", "thu vien co", "thư viện còn", "thu vien con", "bên mình có", "ben minh co"
+    ]
+    if any(k in p or k in p_raw for k in book_search_triggers):
+        stop_phrases = [
+            "tôi muốn tìm kiếm sách", "toi muon tim kiem sach",
+            "tôi muốn tìm sách", "toi muon tim sach", "tôi muốn kiếm sách", "toi muon kiem sach",
+            "mình muốn tìm sách", "minh muon tim sach", "mình muốn kiếm sách", "minh muon kiem sach",
+            "tôi muốn tìm kiếm", "toi muon tim kiem", "tôi muốn tìm", "toi muon tim", "tôi muốn kiếm", "toi muon kiem",
+            "muốn tìm sách", "muon tim sach", "muốn kiếm sách", "muon kiem sach",
+            "tìm kiếm sách", "tim kiem sach", "tra cứu sách", "tra cuu sach",
+            "tìm sách", "tim sach", "kiếm sách", "kiem sach", "tìm cuốn", "tim cuon",
+            "có sách nào về", "co sach nao ve", "có sách nào", "co sach nao",
+            "thư viện có", "thu vien co", "thư viện còn", "thu vien con",
+            "bên mình có", "ben minh co", "có sách", "co sach", "sách gì", "sach gi",
+            "muốn mượn sách", "muon muon sach", "muốn mượn", "muon muon", "mượn sách", "muon sach",
+            "cần tìm sách", "can tim sach", "cần kiếm sách", "can kiem sach",
+            "cần tìm", "can tim", "cần kiếm", "can kiem",
+            "tìm giúp mình", "tim giup minh", "cho mình xem", "cho minh xem", "cho tôi xem", "cho toi xem",
+            "về chủ đề", "ve chu de",
+            "tôi muốn", "toi muon", "mình muốn", "minh muon",
+            "ở thư viện", "o thu vien", "trong kho", "trong thu vien",
+            "còn sách", "con sach", "có cuốn", "co cuon", "tìm quyển", "tim quyen"
+        ]
+        stop_phrases.sort(key=len, reverse=True)
         kw = user_prompt
-        for remove_word in ["tìm sách", "tra cứu sách", "có sách nào về", "tìm giúp mình", "cho mình xem", "về chủ đề"]:
-            kw = re.sub(rf"\b{remove_word}\b", "", kw, flags=re.IGNORECASE).strip()
+        for sp in stop_phrases:
+            kw = re.sub(rf"(?i)\b{re.escape(sp)}\b", " ", kw)
+
+        trail_pattern = r"(?i)\s+(?:k|ko|kh|khong|không|hok|hông|k\s+bạn|ko\s+bạn|k\s+b|ko\s+b|k\s+ad|ko\s+ad|không\s+bạn|không\s+ạ|khong\s+a|ạ|a|nha|nhé|nhe|vậy|vay|hả|ha|nhỉ|nhi|hử|sao)[\s\.,?!~]*$"
+        kw = re.sub(trail_pattern, "", kw)
+        kw = re.sub(r"^(?:sách|sach|cuốn|cuon|quyển|quyen|về|ve)\s+", "", kw, flags=re.IGNORECASE)
+        kw = re.sub(r"\s+", " ", kw).strip(" .,?!~-")
+        kw_clean_raw = remove_accents(kw)
+
+        if not kw or len(kw) < 2 or kw_clean_raw in ["sach", "cuon sach", "quyen sach", "hay", "hay khong", "moi", "hot", "nao", "gi"]:
+            return {
+                "function": "recommend_books",
+                "arguments": {
+                    "genre": "Chung",
+                    "limit": 3
+                }
+            }
+
+        if any(w in kw_clean_raw for w in ["lap trinh", "cong nghe", "ai", "python", "cntt", "code"]):
+            return {
+                "function": "recommend_books",
+                "arguments": {
+                    "genre": "Công nghệ",
+                    "limit": 3
+                }
+            }
+        if any(w in kw_clean_raw for w in ["ky nang", "tam ly", "phat trien ban than", "giao tiep"]):
+            return {
+                "function": "recommend_books",
+                "arguments": {
+                    "genre": "Kỹ năng sống",
+                    "limit": 3
+                }
+            }
+        if any(w in kw_clean_raw for w in ["kinh te", "tai chinh", "kinh doanh", "dau tu"]):
+            return {
+                "function": "recommend_books",
+                "arguments": {
+                    "genre": "Kinh tế",
+                    "limit": 3
+                }
+            }
+
         return {
             "function": "search_books",
             "arguments": {
@@ -620,7 +776,6 @@ def semantic_heuristic_function_caller(user_prompt: str, user_id: Optional[int],
         }
 
     return None
-
 
 def _safe_eval_math(expr_str: str) -> Optional[float]:
     """Tính toán an toàn biểu thức số học cơ bản nếu người dùng hỏi toán học"""
@@ -1067,16 +1222,18 @@ def generate_natural_response_from_tool(tool_name: str, tool_args: dict, tool_re
     elif tool_name == "recommend_books":
         recs = tool_result.get("recommendations", [])
         genre_name = tool_result.get("genre_searched", "phổ biến")
-        lines = [f"{greeting} Đây là những đầu sách **{genre_name}** cực hay và đang có sẵn trong kho SmartLib dành riêng cho bạn: 🌟\n"]
+        if genre_name in ("Chung", "Tất cả", ""):
+            genre_name = "nổi bật và được mượn nhiều nhất"
+        lines = [f"{greeting} Mình rất sẵn lòng hỗ trợ bạn tìm kiếm sách nhé! Dưới đây là những đầu sách **{genre_name}** đang có sẵn trong kho SmartLib để bạn tham khảo nè: 🌟\n"]
         for idx, r in enumerate(recs, 1):
-            lines.append(f"{idx}. **{r['title']}** - *{r['author'] or 'Khuyết danh'}* (Còn {r['available_copies']} cuốn)")
+            lines.append(f"{idx}. **{r['title']}** - *{r['author'] or 'Khuyết danh'}* (Còn sẵn: {r['available_copies']} cuốn)")
             suggested_books.append({
                 "book_id": r["book_id"],
                 "title": r["title"],
                 "author": r["author"],
                 "reason": r["reason"]
             })
-        lines.append("\nBạn có thể bấm vào thẻ sách bên dưới để xem tóm tắt nội dung và đặt mượn nhé! ✨")
+        lines.append("\n💡 Bạn cũng có thể gõ trực tiếp tên tác giả hoặc thể loại (như *'lập trình Python'*, *'kỹ năng giao tiếp'*, *'văn học'*...) để mình tra cứu chính xác hơn nha. Bấm vào thẻ sách bên dưới để xem tóm tắt và đăng ký mượn ngay nhé! ✨")
         return ("\n".join(lines), suggested_books)
 
     elif tool_name == "search_books":
@@ -1088,12 +1245,15 @@ def generate_natural_response_from_tool(tool_name: str, tool_args: dict, tool_re
             )
         lines = [f"{greeting} Mình tìm thấy **{len(books)} cuốn sách** khớp với yêu cầu của bạn: 📚\n"]
         for b in books:
-            lines.append(f"- **{b['title']}** - *{b['author']}* ({b['category']}) - Còn sẵn: {b['available_copies']} bản")
+            avail = b.get('available_copies', 0)
+            status_desc = f"🟢 Còn sẵn {avail} cuốn" if avail > 0 else f"🟡 {b.get('status', 'Tạm hết sách')} (Có thể Đặt trước)"
+            lines.append(f"- **{b['title']}** - *{b['author']}* ({b['category']}) • {status_desc}")
             suggested_books.append({
                 "book_id": b["book_id"],
                 "title": b["title"],
                 "author": b["author"],
-                "reason": f"Thể loại {b['category']} - Còn sẵn {b['available_copies']} cuốn"
+                "category": b.get("category"),
+                "reason": f"Thể loại {b['category']} • {status_desc}"
             })
         return ("\n".join(lines), suggested_books)
 
@@ -1128,9 +1288,9 @@ def _call_gemini_function_calling(
         "Đoạn 3: Còn bài toán/câu hỏi này thì bạn có thể hỏi bạn bè hoặc dùng công cụ tính toán/tìm kiếm trên điện thoại nha. Nếu bạn muốn tìm hiểu thêm về chủ đề này qua các đầu sách trong kho SmartLib thì hãy nhắn 'Đồng ý' để mình giới thiệu sách ngay, hoặc nếu cần hỗ trợ gì về SmartLib, cứ nhắn mình bất cứ lúc nào ạ 🥰"
     )
 
-    configured_model = (os.getenv("AI_MODEL") or "gemini-3.8-flash").strip()
+    configured_model = (os.getenv("AI_MODEL") or "gemini-1.5-flash").strip()
     candidate_models = []
-    for m in ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", configured_model]:
+    for m in [configured_model, "gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"]:
         if m and m not in candidate_models:
             candidate_models.append(m)
 

@@ -1,3 +1,12 @@
+const removeVietnameseAccents = (str) => {
+  if (!str) return '';
+  return str
+    .replace(/[đĐ]/g, 'd')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+};
+
 import { AI_CONFIG, getActiveApiKey } from '../config/aiConfig';
 
 /**
@@ -6,6 +15,7 @@ import { AI_CONFIG, getActiveApiKey } from '../config/aiConfig';
 const generateLocalSmartResponse = (question, books = [], userObj = null, apiKey = '', history = []) => {
   const rawQ = (question || '').trim();
   const q = rawQ.toLowerCase();
+  const qRaw = removeVietnameseAccents(q);
   const userName = userObj?.fullName || userObj?.FullName || userObj?.username || '';
   const greeting = userName ? `Chào bạn ${userName} nha! ✨` : 'Chào bạn nha! ✨';
   const politeGreeting = userName ? `Dạ mình chào ${userName} ạ 😊` : 'Dạ mình chào bạn ạ 😊';
@@ -163,7 +173,13 @@ const generateLocalSmartResponse = (question, books = [], userObj = null, apiKey
   }
 
   // 7. Hỏi về gợi ý sách
-  if (q.includes('phát triển bản thân') || q.includes('kỹ năng') || q.includes('tư duy') || q.includes('sách hay') || q.includes('gợi ý') || q.includes('đề xuất')) {
+  const isBookSearch = [
+    'phát triển bản thân', 'kỹ năng', 'tư duy', 'sách hay', 'gợi ý', 'đề xuất',
+    'kiếm sách', 'tìm sách', 'mượn sách', 'sách gì', 'muốn tìm', 'muốn kiếm',
+    'sách nào', 'có sách', 'xem sách', 'tra cứu sách'
+  ].some(k => q.includes(k) || qRaw.includes(removeVietnameseAccents(k)));
+
+  if (isBookSearch) {
     const matched = books.filter(b =>
       (b.category && (b.category.includes('Kỹ năng') || b.category.includes('Tâm lý') || b.category.includes('Kinh doanh')))
     ).slice(0, 3);
@@ -191,10 +207,28 @@ Bạn có thể bấm vào thẻ sách gợi ý bên dưới để xem chi tiế
     };
   }
 
-  // 8. Kiểm tra tình trạng / tồn kho cuốn sách
-  const foundBooks = books.filter(b =>
-    b.title && (b.title.toLowerCase().includes(q) || q.includes(b.title.toLowerCase()))
-  );
+  // 8. Tra cứu theo tên sách / từ khóa (hỗ trợ cả tiếng Việt không dấu & teen-code)
+  let cleanKw = qRaw;
+  const stopKeywords = [
+    'co sach nao ve', 'co sach nao', 'co sach gi', 'co sach', 'sach gi', 'tim sach', 'kiem sach',
+    'muon tim', 'muon kiem', 'tim kiem', 'doc sach', 'muon sach', 'thu vien co', 'thu vien con'
+  ];
+  stopKeywords.forEach(sw => {
+    cleanKw = cleanKw.replace(new RegExp('\\b' + sw + '\\b', 'g'), ' ');
+  });
+  cleanKw = cleanKw.replace(/\s+(?:k|ko|kh|khong|hok|a|nha|nhe|vay|ha)[\s.,?!~]*$/g, '');
+  cleanKw = cleanKw.replace(/^(?:sach|cuon|quyen|ve)\s+/g, '').trim();
+
+  const foundBooks = books.filter(b => {
+    const bTitle = (b.title || '').toLowerCase();
+    const bRaw = removeVietnameseAccents(bTitle);
+    const bAuth = removeVietnameseAccents(b.author || '');
+    const bCat = removeVietnameseAccents(b.category || '');
+    if (!cleanKw || cleanKw.length < 2) return false;
+    return bTitle.includes(q) || q.includes(bTitle) ||
+           bRaw.includes(cleanKw) || cleanKw.includes(bRaw) ||
+           bAuth.includes(cleanKw) || bCat.includes(cleanKw);
+  });
   if (foundBooks.length > 0) {
     const b = foundBooks[0];
     const avail = b.available ?? b.available_copies ?? 1;

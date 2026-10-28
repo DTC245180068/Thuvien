@@ -12,7 +12,7 @@ export const AI_CONFIG = {
   PROVIDER: 'gemini',
 
   // Model AI sử dụng: 'gemini-3.8-flash' (kèm cơ chế tự động tương thích dòng Gemini Flash)
-  MODEL: 'gemini-3.8-flash',
+  MODEL: 'gemini-1.5-flash',
 
   // Thời gian chờ phản hồi tối thiểu (mili giây)
   MIN_RESPONSE_DELAY_MS: 300

@@ -248,9 +248,9 @@ Quy tắc BẮT BUỘC:
 """
 
     if gemini_key:
-        configured_model = (os.getenv("AI_MODEL") or "gemini-3.8-flash").strip()
+        configured_model = (os.getenv("AI_MODEL") or "gemini-1.5-flash").strip()
         candidate_models = []
-        for m in ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", configured_model]:
+        for m in [configured_model, "gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"]:
             if m and m not in candidate_models:
                 candidate_models.append(m)
 

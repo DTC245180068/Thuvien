@@ -12,11 +12,12 @@ import ExportReportModal from '../components/ExportReportModal';
 import BookAIUpload from '../components/BookAIUpload';
 import AdminChatbot from '../components/AdminChatbot';
 import AlertQueue from '../components/AlertQueue';
+import ProcurementModal from '../components/ProcurementModal';
 import ReceiptQRScannerModal from '../components/ReceiptQRScannerModal';
 import { UPCOMING_BOOKS } from '../components/UpcomingBooksSection';
 import {
   BookOpen, Users, Clock, AlertTriangle, CheckCircle, Search, Plus,
-  FileSpreadsheet, Filter, Grid, List, Check, X, Edit2, Trash2, BookMarked, Eye,
+  FileSpreadsheet, Filter, Grid, List, Check, X, Edit2, Trash2, BookMarked, Eye, TrendingUp,
   BookmarkCheck, XCircle, QrCode, Lock, Unlock,
   SlidersHorizontal, DollarSign, Calendar, Building2, CreditCard, Save, RotateCcw, ShieldCheck,
   PackageCheck, Sparkles, Star, ShieldAlert
@@ -664,6 +665,7 @@ export default function AdminDashboard({ activeTab, onTabChange, isLibrarian = f
   const [aiUploadOpen, setAiUploadOpen] = useState(false);
   const [chatbotOpen, setChatbotOpen] = useState(false);
   const [alertQueueOpen, setAlertQueueOpen] = useState(false);
+  const [procurementModalOpen, setProcurementModalOpen] = useState(false);
   const [receiptScannerOpen, setReceiptScannerOpen] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
   const [readerModalOpen, setReaderModalOpen] = useState(false);
@@ -6231,6 +6233,12 @@ export default function AdminDashboard({ activeTab, onTabChange, isLibrarian = f
         </div>,
         document.body
       )}
+
+            {/* Modal AI Dự báo nhu cầu nhập sách (SMA Predictor) */}
+      <ProcurementModal
+        isOpen={procurementModalOpen}
+        onClose={() => setProcurementModalOpen(false)}
+      />
 
       {/* Modal Hàng đợi Cảnh báo Bất thường (AI Anomaly Detection) */}
       {alertQueueOpen && typeof document !== 'undefined' && createPortal(

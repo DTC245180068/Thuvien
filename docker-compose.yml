@@ -48,6 +48,9 @@ services:
       - MYSQL_DATABASE=${MYSQL_DATABASE}
       - JWT_SECRET=${JWT_SECRET}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - AI_PROVIDER=${AI_PROVIDER:-gemini}
+      - AI_MODEL=${AI_MODEL:-gemini-1.5-flash}
     volumes:
       # Chia sẻ thư mục cấu hình và sao lưu dữ liệu với máy host
       - ./database:/app/database
