@@ -61,61 +61,70 @@ class ExtractedBookResponse(BaseModel):
 
 def _extract_with_gemini(image_bytes: bytes, mime_type: str) -> Optional[dict]:
     api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
-    if not api_key or not api_key.startswith("AIza"):
+    if not api_key or not (api_key.startswith("AQ") or api_key.startswith("AIza")):
         return None
 
-    try:
-        b64_image = base64.b64encode(image_bytes).decode("utf-8")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [
-                        {
-                            "text": (
-                                "Bạn là chuyên gia biên mục thư viện. Hãy phân tích ảnh bìa sách này và trích xuất thông tin thành JSON chuẩn:\n"
-                                "{\n"
-                                '  "title": "Tên sách đầy đủ, chuẩn xác",\n'
-                                '  "author": "Tên tác giả hoặc nhóm tác giả",\n'
-                                '  "category": "Chọn 1 trong các thể loại: Công nghệ, Kinh tế, Văn học, Kỹ năng sống, Khoa học, Lịch sử, Ngoại ngữ, Khác",\n'
-                                '  "publisher": "Nhà xuất bản (nếu thấy trên bìa)",\n'
-                                '  "publish_year": 2026,\n'
-                                '  "description": "Tóm tắt ngắn gọn 1-2 câu về chủ đề sách",\n'
-                                '  "ai_tags": ["tag1", "tag2", "tag3"],\n'
-                                '  "confidence": 0.95\n'
-                                "}\n"
-                                "Chỉ trả về JSON thuần, không bọc markdown ```json."
-                            )
-                        },
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": b64_image
-                            }
+    configured_model = (os.getenv("AI_MODEL") or "gemini-3.8-flash").strip()
+    candidate_models = []
+    for m in ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", configured_model]:
+        if m and m not in candidate_models:
+            candidate_models.append(m)
+
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": (
+                            "Bạn là chuyên gia biên mục thư viện. Hãy phân tích ảnh bìa sách này và trích xuất thông tin thành JSON chuẩn:\n"
+                            "{\n"
+                            '  "title": "Tên sách đầy đủ, chuẩn xác",\n'
+                            '  "author": "Tên tác giả hoặc nhóm tác giả",\n'
+                            '  "category": "Chọn 1 trong các thể loại: Công nghệ, Kinh tế, Văn học, Kỹ năng sống, Khoa học, Lịch sử, Ngoại ngữ, Khác",\n'
+                            '  "publisher": "Nhà xuất bản (nếu thấy trên bìa)",\n'
+                            '  "publish_year": 2026,\n'
+                            '  "description": "Tóm tắt ngắn gọn 1-2 câu về chủ đề sách",\n'
+                            '  "ai_tags": ["tag1", "tag2", "tag3"],\n'
+                            '  "confidence": 0.95\n'
+                            "}\n"
+                            "Chỉ trả về JSON thuần, không bọc markdown ```json."
+                        )
+                    },
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": b64_image
                         }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 600
+                    }
+                ]
             }
+        ],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 600
         }
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            resp_data = json.loads(resp.read().decode("utf-8"))
-            content = resp_data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            content = re.sub(r"^```json\s*", "", content)
-            content = re.sub(r"\s*```$", "", content)
-            return json.loads(content)
-    except Exception as e:
-        print(f"[AI Cataloging] Gemini Vision request failed: {e}")
-        return None
+    }
+
+    for model_name in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                content = resp_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                content = re.sub(r"^```json\s*", "", content)
+                content = re.sub(r"\s*```$", "", content)
+                return json.loads(content)
+        except Exception as e:
+            print(f"[AI Cataloging] Gemini Vision ({model_name}) failed: {e}")
+            continue
+    return None
 
 
 def _extract_with_openai(image_bytes: bytes, mime_type: str) -> Optional[dict]:

@@ -182,15 +182,15 @@ def validate_reader_prompt_boundaries(user_prompt: str) -> None:
 def validate_api_key_format(explicit_api_key: Optional[str]) -> Optional[str]:
     """
     Kiểm tra tính hợp lệ của API Key khi người dùng cấu hình hoặc nhập trên giao diện.
-    Nếu nhập key sai định dạng (quá ngắn hoặc không đúng chuẩn Gemini 'AIza...' / OpenAI 'sk-...'),
-    lập tức chặn và báo lỗi HTTP 401 rõ ràng.
+    Hỗ trợ Google Gemini / Vertex AI API Key (bắt đầu bằng 'AQ.' hoặc 'AIza...') và OpenAI API Key ('sk-...').
+    Nếu nhập key sai định dạng, lập tức chặn và báo lỗi HTTP 401 rõ ràng.
     """
     if explicit_api_key is not None and explicit_api_key.strip() != "":
         key = explicit_api_key.strip()
-        if len(key) < 20 or not (key.startswith("AIza") or key.startswith("sk-")):
+        if len(key) < 20 or not (key.startswith("AQ") or key.startswith("AIza") or key.startswith("sk-")):
             raise HTTPException(
                 status_code=401,
-                detail="API Key không hợp lệ! Vui lòng nhập đúng Google Gemini API Key (bắt đầu bằng 'AIza...') hoặc OpenAI API Key (bắt đầu bằng 'sk-...')."
+                detail="API Key không hợp lệ! Vui lòng nhập đúng Google Gemini API Key (bắt đầu bằng 'AQ...' hoặc 'AIza...') hoặc OpenAI API Key (bắt đầu bằng 'sk-...')."
             )
         return key
 
@@ -201,10 +201,10 @@ def validate_api_key_format(explicit_api_key: Optional[str]) -> Optional[str]:
             status_code=401,
             detail="Hệ thống yêu cầu cấu hình GEMINI_API_KEY hoặc OPENAI_API_KEY trong file .env hoặc mục Cài đặt API Key để sử dụng AI."
         )
-    if env_key and (len(env_key) < 20 or not (env_key.startswith("AIza") or env_key.startswith("sk-"))):
+    if env_key and (len(env_key) < 20 or not (env_key.startswith("AQ") or env_key.startswith("AIza") or env_key.startswith("sk-"))):
         raise HTTPException(
             status_code=401,
-            detail="API Key cấu hình trong file .env không hợp lệ! Vui lòng kiểm tra lại GEMINI_API_KEY hoặc OPENAI_API_KEY."
+            detail="API Key cấu hình trong file .env không hợp lệ! Vui lòng kiểm tra lại GEMINI_API_KEY (bắt đầu bằng 'AQ...' hoặc 'AIza...') hoặc OPENAI_API_KEY ('sk-...')."
         )
     return env_key if env_key else None
 
@@ -922,17 +922,23 @@ def _call_gemini_function_calling(
     explicit_user_key: bool = False
 ) -> tuple[str, Optional[dict], list]:
     """
-    Thực thi Function Calling 5 bước trên Google Gemini API (gemini-2.0-flash / gemini-1.5-flash).
+    Thực thi Function Calling 5 bước trên Google Gemini API (gemini-3.8-flash / gemini-2.5-flash / gemini-2.0-flash).
+    Hỗ trợ cả khóa API bắt đầu bằng 'AQ.' (Vertex AI / Google Cloud API Key) và 'AIza...' (Google AI Studio).
     Trả về (final_reply, tool_call_meta, suggested_books).
     """
     system_instruction = (
         "Bạn là Thủ thư AI thân thiện, chuyên nghiệp của Hệ thống Thư viện Thông minh SmartLib (Trường ĐH CNTT & Truyền thông - ICTU). "
         "Nhiệm vụ chính: Hỗ trợ độc giả tìm kiếm sách, kiểm tra tồn kho, tra cứu phiếu mượn cá nhân, giải đáp nội quy thư viện (hạn mượn 14 ngày, phạt 2.000đ/ngày, khóa tài khoản khi quá hạn >= 3 ngày, nộp phạt VNPay, trả sách bằng mã QR tại quầy). "
         "Khi độc giả hỏi dữ liệu cụ thể, BẮT BUỘC gọi Function/Tool tương ứng. "
-        "Nếu độc giả hỏi câu hỏi ngoài phạm vi thư viện (ví dụ: toán học, thời tiết, lập trình, đời sống...), hãy trả lời ngắn gọn, chính xác, lịch sự trong 2-3 câu và khéo léo gợi ý họ khám phá kho sách của SmartLib."
+        "Nếu độc giả hỏi câu hỏi ngoài phạm vi thư viện (ví dụ: toán học, thời tiết, lập trình, đời sống...), hãy trả lời ngắn gọn, chính xác, lịch sự trong 2-3 câu, nêu rõ câu hỏi nằm ngoài phạm vi nghiệp vụ chính của thư viện và khéo léo gợi ý họ khám phá kho sách của SmartLib."
     )
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    configured_model = (os.getenv("AI_MODEL") or "gemini-3.8-flash").strip()
+    candidate_models = []
+    for m in ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", configured_model]:
+        if m and m not in candidate_models:
+            candidate_models.append(m)
+
     payload = {
         "system_instruction": {
             "parts": [{"text": system_instruction}]
@@ -954,22 +960,43 @@ def _call_gemini_function_calling(
         }
     }
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"}
-    )
+    res_json = None
+    used_model = configured_model
+    last_http_err = None
+    last_err = None
 
-    try:
-        with urllib.request.urlopen(req, timeout=15) as response:
-            res_json = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as http_err:
-        if http_err.code in (400, 401, 403) and explicit_user_key:
+    for model_name in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=6) as response:
+                res_json = json.loads(response.read().decode("utf-8"))
+                used_model = configured_model or model_name
+                break
+        except urllib.error.HTTPError as http_err:
+            last_http_err = http_err
+            if http_err.code in (400, 401, 403) and explicit_user_key:
+                break
+            continue
+        except Exception as err:
+            last_err = err
+            continue
+
+    if res_json is None:
+        if last_http_err is not None and last_http_err.code in (400, 401, 403) and explicit_user_key:
             raise HTTPException(
                 status_code=401,
                 detail="Google Gemini API Key không hợp lệ hoặc đã hết hạn! Vui lòng kiểm tra lại API Key của bạn."
             )
-        raise
+        if last_http_err is not None:
+            raise last_http_err
+        if last_err is not None:
+            raise last_err
+        return "", None, []
 
     candidates = res_json.get("candidates", [])
     if not candidates:
@@ -986,7 +1013,7 @@ def _call_gemini_function_calling(
             "name": fn_name,
             "arguments": fn_args,
             "status": "executed",
-            "engine": "gemini-2.0-flash"
+            "engine": used_model
         }
         final_reply, suggested_books = generate_natural_response_from_tool(
             fn_name, fn_args, tool_result, user_name
@@ -1016,7 +1043,7 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
     """
     Endpoint Chatbot Độc giả ứng dụng Mô hình 2: Function Calling (Tool Calling):
     - Kiểm soát chặt chẽ các trường hợp biên (Rỗng, Quá ngắn/Ký tự đặc biệt, Quá dài > 1000 ký tự, SQL/Prompt Injection, API Key sai).
-    - Hỗ trợ Google Gemini 2.0 Flash & OpenAI GPT-4o-mini Function Calling.
+    - Hỗ trợ Google Gemini 3.8 Flash ('AQ...' / 'AIza...') & OpenAI GPT-4o-mini ('sk-...') Function Calling.
     - Kiểm soát câu hỏi ngoài phạm vi (Out-of-Scope Guardrail) chuẩn xác.
     """
     user_prompt = (req.message or "").strip()
@@ -1035,9 +1062,9 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
     intent_name = "general_chat"
 
     # -------------------------------------------------------------
-    # NHÁNH 1A: GOOGLE GEMINI API (NẾU CÓ GEMINI API KEY 'AIza...')
+    # NHÁNH 1A: GOOGLE GEMINI API (HỖ TRỢ KEY 'AQ...' HOẶC 'AIza...')
     # -------------------------------------------------------------
-    if api_key and api_key.startswith("AIza"):
+    if api_key and (api_key.startswith("AQ") or api_key.startswith("AIza")):
         try:
             final_reply, tool_call_meta, suggested_books = _call_gemini_function_calling(
                 api_key=api_key,
@@ -1049,6 +1076,27 @@ async def reader_chat_endpoint(req: ReaderChatRequest):
             )
             if tool_call_meta:
                 intent_name = tool_call_meta["name"]
+            elif final_reply:
+                # Nếu Gemini trả lời văn bản trực tiếp (không gọi Tool), kiểm tra xem có phải câu hỏi nghiệp vụ hoặc ngoài phạm vi
+                heuristic_call = semantic_heuristic_function_caller(user_prompt, req.userId, db)
+                if heuristic_call:
+                    # Ưu tiên thực thi Tool CSDL thật để đảm bảo số liệu chính xác 100%
+                    final_reply = ""
+                else:
+                    oos_reply, oos_books, oos_intent = handle_out_of_scope_or_general_question(
+                        user_prompt=user_prompt,
+                        user_name=req.userName,
+                        db=db,
+                        has_api_key=True
+                    )
+                    intent_name = oos_intent
+                    if not suggested_books and oos_books:
+                        suggested_books = oos_books
+                    if oos_intent == "out_of_scope" and "ngoài phạm vi" not in final_reply.lower():
+                        final_reply = (
+                            f"{final_reply}\n\n"
+                            f"*(Lưu ý: Câu hỏi nằm ngoài phạm vi nghiệp vụ CSDL Thư viện SmartLib — Thủ thư AI hỗ trợ giải đáp qua mô hình Gemini 3.8 Flash)*"
+                        )
         except HTTPException:
             raise
         except Exception as ex:

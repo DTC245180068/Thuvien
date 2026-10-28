@@ -49,11 +49,11 @@ const generateLocalSmartResponse = (question, books = [], userObj = null, apiKey
     };
   }
 
-  // 3. Kiểm tra định dạng API Key nếu người dùng có nhập
-  if (apiKey && (apiKey.length < 20 || !(apiKey.startsWith('AIza') || apiKey.startsWith('sk-')))) {
+  // 3. Kiểm tra định dạng API Key nếu người dùng có nhập (Hỗ trợ AQ..., AIza..., sk-...)
+  if (apiKey && (apiKey.length < 20 || !(apiKey.startsWith('AQ') || apiKey.startsWith('AIza') || apiKey.startsWith('sk-')))) {
     return {
       found: false,
-      answer: '⚠️ API Key không hợp lệ! Vui lòng nhập đúng Google Gemini API Key (bắt đầu bằng "AIza...") hoặc OpenAI API Key (bắt đầu bằng "sk-...").',
+      answer: '⚠️ API Key không hợp lệ! Vui lòng nhập đúng Google Gemini API Key (bắt đầu bằng "AQ..." hoặc "AIza...") hoặc OpenAI API Key (bắt đầu bằng "sk-...").',
       tool_call: null,
       suggested_books: [],
       intent: 'api_key_error'

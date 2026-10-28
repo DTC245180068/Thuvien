@@ -188,15 +188,15 @@ def validate_read_only_sql(sql: str) -> bool:
 
 
 def _validate_admin_api_key(explicit_key: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-    """Kiểm tra tính hợp lệ của API Key (Gemini hoặc OpenAI) nếu được truyền vào"""
+    """Kiểm tra tính hợp lệ của API Key (Gemini 'AQ...' / 'AIza...' hoặc OpenAI 'sk-...') nếu được truyền vào"""
     if explicit_key is not None and explicit_key.strip() != "":
         k = explicit_key.strip()
-        if len(k) < 20 or not (k.startswith("AIza") or k.startswith("sk-")):
+        if len(k) < 20 or not (k.startswith("AQ") or k.startswith("AIza") or k.startswith("sk-")):
             raise HTTPException(
                 status_code=401,
-                detail="API Key không hợp lệ! Vui lòng nhập đúng Google Gemini API Key ('AIza...') hoặc OpenAI API Key ('sk-...')."
+                detail="API Key không hợp lệ! Vui lòng nhập đúng Google Gemini API Key ('AQ...' hoặc 'AIza...') hoặc OpenAI API Key ('sk-...')."
             )
-        if k.startswith("AIza"):
+        if k.startswith("AQ") or k.startswith("AIza"):
             return k, None
         return None, k
 
@@ -208,11 +208,16 @@ def _validate_admin_api_key(explicit_key: Optional[str]) -> tuple[Optional[str],
             status_code=401,
             detail="Hệ thống yêu cầu cấu hình GEMINI_API_KEY hoặc OPENAI_API_KEY trong file .env để sử dụng Text-to-SQL AI."
         )
+    if gemini_key and (len(gemini_key) < 20 or not (gemini_key.startswith("AQ") or gemini_key.startswith("AIza"))):
+        raise HTTPException(
+            status_code=401,
+            detail="GEMINI_API_KEY cấu hình trong file .env không hợp lệ! Vui lòng kiểm tra lại (bắt đầu bằng 'AQ...' hoặc 'AIza...')."
+        )
     return gemini_key, openai_key
 
 
 def _translate_with_llm(user_prompt: str, explicit_key: Optional[str] = None) -> Optional[dict]:
-    """Gọi Google Gemini API hoặc OpenAI API để dịch câu hỏi tự nhiên sang SQL SELECT an toàn"""
+    """Gọi Google Gemini API (gemini-3.8-flash) hoặc OpenAI API để dịch câu hỏi tự nhiên sang SQL SELECT an toàn"""
     gemini_key, openai_key = _validate_admin_api_key(explicit_key)
 
     if not gemini_key and not openai_key:
@@ -243,40 +248,54 @@ Quy tắc BẮT BUỘC:
 """
 
     if gemini_key:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
-            payload = {
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [{"text": f"{system_instruction}\n\nCâu hỏi của Thủ thư: {user_prompt}"}]
-                    }
-                ],
-                "generationConfig": {
-                    "temperature": 0.1,
-                    "maxOutputTokens": 500
+        configured_model = (os.getenv("AI_MODEL") or "gemini-3.8-flash").strip()
+        candidate_models = []
+        for m in ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", configured_model]:
+            if m and m not in candidate_models:
+                candidate_models.append(m)
+
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": f"{system_instruction}\n\nCâu hỏi của Thủ thư: {user_prompt}"}]
                 }
+            ],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 500
             }
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                resp_data = json.loads(resp.read().decode("utf-8"))
-                content = resp_data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                content = re.sub(r"^```json\s*", "", content)
-                content = re.sub(r"\s*```$", "", content)
-                return json.loads(content)
-        except urllib.error.HTTPError as http_err:
-            if http_err.code in (400, 401, 403) and explicit_key:
-                raise HTTPException(
-                    status_code=401,
-                    detail="Google Gemini API Key không hợp lệ hoặc đã hết hạn!"
+        }
+
+        last_http_err = None
+        for model_name in candidate_models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_key}"
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
                 )
-            print(f"[Text-to-SQL] Gemini translation failed: {http_err}")
-        except Exception as e:
-            print(f"[Text-to-SQL] Gemini translation failed: {e}")
+                with urllib.request.urlopen(req, timeout=6) as resp:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    content = resp_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    content = re.sub(r"^```json\s*", "", content)
+                    content = re.sub(r"\s*```$", "", content)
+                    return json.loads(content)
+            except urllib.error.HTTPError as http_err:
+                last_http_err = http_err
+                if http_err.code in (400, 401, 403) and explicit_key:
+                    break
+                continue
+            except Exception as e:
+                print(f"[Text-to-SQL] Gemini translation attempt ({model_name}) failed: {e}")
+                continue
+
+        if last_http_err is not None and last_http_err.code in (400, 401, 403) and explicit_key:
+            raise HTTPException(
+                status_code=401,
+                detail="Google Gemini API Key không hợp lệ hoặc đã hết hạn!"
+            )
 
     if openai_key:
         try:
@@ -536,8 +555,10 @@ def _execute_safe_query(sql_query: str) -> tuple[List[str], List[Dict[str, Any]]
 
     hidden_cols = {"password", "password_hash", "jwt_secret", "api_key"}
 
+    normalized_sql = re.sub(r"\b(NOW|CURDATE)\s*\(\s*\)", "CURRENT_TIMESTAMP", sql_query, flags=re.IGNORECASE)
+
     with engine.connect() as connection:
-        result = connection.execute(text(sql_query))
+        result = connection.execute(text(normalized_sql))
         raw_columns = list(result.keys())
         safe_columns = [c for c in raw_columns if c.lower() not in hidden_cols]
         rows = result.fetchall()
