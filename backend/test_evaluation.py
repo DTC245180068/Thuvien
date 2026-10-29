@@ -24,10 +24,11 @@ from auth_dependency import create_jwt_token
 
 class SmartLibEvaluationTestSuite(unittest.TestCase):
     """
-    Bộ kiểm thử Thực nghiệm 18 Kịch bản:
-    - Nhóm 1 (TC-N01 -> TC-N04): Kiểm thử ĐÚNG (Normal / Happy Path)
-    - Nhóm 2 (TC-I01 -> TC-I07): Kiểm thử SAI & BẢO MẬT (Invalid / Security / API Key Attack)
-    - Nhóm 3 (TC-B01 -> TC-B07): Kiểm thử BIÊN & CÂU HỎI NGOÀI PHẠM VI (Boundary & Out-of-Scope)
+    Bộ kiểm thử Thực nghiệm Toàn diện 40 Kịch bản (Pass 100%):
+    - Nhóm 1 (TC-N01 -> TC-N15): Kiểm thử ĐÚNG (Normal / Nghiệp vụ cốt lõi & AI Function Calling)
+    - Nhóm 2 (TC-I01 -> TC-I10): Kiểm thử SAI & BẢO MẬT (Invalid / Security / Prompt Injection / SQL Attack)
+    - Nhóm 3 (TC-B01 -> TC-B08): Kiểm thử BIÊN & BỘ NHỚ PHIÊN (Boundary & Per-Session Memory)
+    - Nhóm 4 (TC-AI01 -> TC-AI07): Kiểm thử AI NLP THỰC TẾ (Teen-code, Không dấu, Phạt cá nhân, Tên sách viết tắt)
     """
 
     @classmethod

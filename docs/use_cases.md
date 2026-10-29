@@ -158,7 +158,7 @@ flowchart LR
 
 ## 5. THỰC NGHIỆM KIỂM THỬ HỆ THỐNG: ĐÚNG – SAI – BIÊN (TIÊU CHÍ 3.1 & 3.3)
 
-Bộ kiểm thử dưới đây được thiết kế bao phủ đầy đủ 3 khía cạnh **Đúng (Normal)**, **Sai (Invalid/Attack)** và **Biên (Boundary)** cho cả nghiệp vụ cốt lõi lẫn các phân hệ AI, và đã được tự động hóa trong script [`backend/test_evaluation.py`](file:///d:/UDAI/Thuvien/backend/test_evaluation.py).
+Bộ kiểm thử dưới đây được thiết kế bao phủ đầy đủ 3 khía cạnh **Đúng (Normal)**, **Sai (Invalid/Attack)** và **Biên (Boundary)** cho cả nghiệp vụ cốt lõi lẫn các phân hệ AI, và đã được tự động hóa trong script [`backend/test_evaluation.py`](../backend/test_evaluation.py).
 
 ### 5.1. Nhóm Kiểm thử ĐÚNG (Normal / Positive Cases)
 

@@ -130,7 +130,15 @@ Trong quá trình phát triển cùng công cụ AI, sinh viên luôn giữ tư 
 
 ## 4. CÁC ĐÓNG GÓP & CẢI TIẾN KỸ THUẬT RIÊNG CỦA SINH VIÊN (TIÊU CHÍ 5.4)
 
-Vượt lên trên các yêu cầu CRUD và gọi API AI cơ bản, sinh viên đã chủ động nghiên cứu và đóng góp **5 cải tiến kỹ thuật có tính ứng dụng thực tiễn cao**:
+### 4.1. Bảng Phân công Nhiệm vụ & Đóng góp Độc lập Từng Thành viên (Tiêu chí 5.3 & 5.4)
+
+| Thành viên thực hiện | Vai trò trong nhóm | Phân hệ phụ trách chính | Đóng góp kỹ thuật riêng & Minh chứng mã nguồn |
+| :--- | :---: | :--- | :--- |
+| **Vũ Hồng Dũng**<br>MSSV: `DTC245180068` | **Nhóm Trưởng**<br>(Fullstack & DevOps) | • Kiến trúc tổng thể & Backend API Core<br>• Phân quyền RBAC JWT (`backend/auth_dependency.py`)<br>• AI Reader Agent & Bộ lọc Guardrails (`backend/ai_reader_agent.py`)<br>• Đóng gói Docker, Nginx SSL & Quản trị Git | • Thiết kế Function Calling 5 bước tra cứu kho sách thật.<br>• Viết Regex xử lý teen-code ('k', 'ko', 'ạ'), tiếng Việt không dấu, tên sách viết tắt và Guardrail chặn SQL/Prompt Injection (HTTP 403).<br>• Cấu hình Docker Compose đa container và sinh chứng chỉ SSL tự ký. |
+| **Nguyễn Trung Học**<br>MSSV: `DTC245180174` | **Thành viên**<br>(Database & AI Backend) | • Thiết kế CSDL MySQL 8.0 chuẩn 3NF 7 bảng (`database/smartlib_mysql.sql`)<br>• Kiến trúc Dual-Mode SQLite Mirror (`backend/mysql_db.py`)<br>• Module AI Text-to-SQL (`backend/ai_text2sql.py`)<br>• Dự báo SMA & Anomaly Detection (`predictive_analysis.py`) | • Xây dựng bộ Schema Pruning và chặn lộ mật khẩu `password_hash` trên Text-to-SQL.<br>• Lập trình thuật toán SMA-3 dự báo thiếu hụt sách cho bảng `ai_procurement`.<br>• Phát triển bộ kiểm thử tự động toàn diện 40/40 Test Cases (`test_evaluation.py`). |
+| **Lê Quang Hưng**<br>MSSV: `DTC245180036` | **Thành viên**<br>(Frontend UI/UX & AI Vision) | • Giao diện người dùng React 18, Tailwind CSS, Optimistic UI<br>• AI Cataloging đọc ảnh bìa sách (`backend/ai_cataloging.py`)<br>• Chatbot Widget Độc giả (`AIChatWidget.jsx`, `aiService.js`)<br>• Quy trình Trả sách QR Code (`ReceiptQRScannerModal.jsx`) & Modal Dự báo | • Thiết kế quy trình Biên mục ảnh bìa Human-in-the-loop (không ghi đè CSDL tự động).<br>• Xử lý sự kiện click thẻ sách AI mở popup chi tiết sách (`smartlib:open-book-detail`).<br>• Triển khai cơ chế đồng bộ đa tab 0ms qua BroadcastChannel API và xác thực trả sách qua QR tại quầy. |
+
+### 4.2. Năm Cải tiến Kỹ thuật Vượt trội của Hệ thống
 
 1. **Kiến trúc Multi-tier Smart Fallback (3 Tầng Dự phòng AI):**
    - Đảm bảo hệ thống đạt **100% Uptime** ngay cả khi chấm bài ở phòng máy không có Internet, hết hạn mức API Key hoặc LLM phản hồi chậm:
@@ -183,6 +191,19 @@ Dưới đây là bộ **10 câu hỏi vấn đáp trọng tâm** giúp sinh vi�
   1. **Kiểm thử Đúng (Normal):** Đăng nhập RBAC, Function Calling tìm sách, Text-to-SQL hợp lệ, trích xuất ảnh PNG hợp lệ.
   2. **Kiểm thử Sai (Invalid/Attack):** Sai mật khẩu (401), Reader gọi API Admin (403), SQL Injection `DROP/DELETE` (403), hỏi `password_hash` (403), tải file `.txt` vào API ảnh (400).
   3. **Kiểm thử Biên (Boundary):** Câu hỏi rỗng `""` (400), file ảnh vượt biên `10MB + 1 byte` (400), mượn sách khi `available_copies = 0`, và chạy AI khi xóa sạch API Key.
+
+### Câu 8: Thuật toán dự báo nhu cầu nhập sách SMA trong `predictive_analysis.py` hoạt động như thế nào? Tại sao lại dùng Moving Average 3 kỳ (SMA-3) thay vì hồi quy tuyến tính hay deep learning phức tạp? (CLO1, CLO5 - Tiêu chí 2.3, 5.4)
+- **Trả lời:** Với bài toán quản lý thư viện trường học gồm 60 đầu sách và dữ liệu mượn trả theo từng học kỳ, mô hình **Simple Moving Average 3 kỳ (SMA-3)** là tối ưu nhất vì:
+  1. Dễ giải thích (Explainable AI), tính toán nhẹ và thời gian phản hồi $< 100ms$, không cần nạp GPU nặng nề.
+  2. Tránh hiện tượng Overfitting khi tập dữ liệu mượn lịch sử còn ở mức vừa phải.
+  3. Kết hợp với chỉ số rủi ro thiếu hụt $Shortage\_Risk = \frac{Forecast - Available}{Available + 1}$ để tự động đề xuất số cuốn cần nhập bổ sung và lưu vào bảng `ai_procurement`.
+
+### Câu 9: Làm sao đảm bảo tính đồng bộ dữ liệu đa tab theo thời gian thực (0ms) giữa màn hình Độc giả và Thủ thư mà không cần cài đặt thêm WebSockets phức tạp? (CLO5 - Tiêu chí 4.1, 5.4)
+- **Trả lời:** Nhóm sử dụng chuẩn **BroadcastChannel API (`smartlib_realtime_sync`)** được tích hợp trong `AuthContext.jsx` và các service. Khi Thủ thư duyệt phiếu mượn hoặc mở khóa tài khoản ở Tab Admin, trình duyệt lập tức phát broadcast event qua kênh cục bộ. Tab Độc giả bên cạnh bắt được event và cập nhật state React tức thì mà không cần server WebSockets trung gian, vừa tối ưu tài nguyên vừa đảm bảo trải nghiệm người dùng liền mạch.
+
+### Câu 10: Em hãy giải thích kiến trúc Dual-Mode Persistence trong `backend/mysql_db.py`? Khi nào ghi vào MySQL, khi nào ghi vào SQLite và làm sao để dữ liệu không bị mất mát? (CLO1, CLO5 - Tiêu chí 1.3, 5.4)
+- **Trả lời:** Hệ thống ưu tiên kết nối `MySQL 8.0` chuẩn 3NF làm nguồn sự thật (Source of Truth). Khi khởi động, Backend thử kết nối qua SQLAlchemy pool với `timeout=3s`. Nếu MySQL khả dụng, hệ thống dùng MySQL cho mọi giao dịch ACID. Nếu MySQL bị tắt hoặc lỗi kết nối, `DualModeDB` tự động kích hoạt **SQLite Local Mirror (`smartlib_local.db`)** với đầy đủ 60 đầu sách và cấu trúc bảng tương đương. Nhờ đó, buổi báo cáo demo hoặc hệ thống luôn hoạt động ổn định và không bao giờ bị sập do lỗi hạ tầng CSDL ngoại vi.
+
 
 ---
 

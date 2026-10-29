@@ -305,7 +305,7 @@ Bảng chuyên biệt lưu trữ đầu ra của thuật toán dự báo nhu c�
 
 ## 4. ÁNH XẠ CSDL VÀO SCHEMA PROMPT CHO AI TEXT-TO-SQL & FUNCTION CALLING
 
-Để LLM sinh câu lệnh SQL chính xác 100% mà không bị lỗi tên cột (Hallucination) và không làm lộ dữ liệu mật, hệ thống sử dụng kỹ thuật **Schema Pruning (Tỉa gọn Schema)** khi đưa vào `DATABASE_SCHEMA_PROMPT` trong [`backend/ai_text2sql.py`](file:///d:/UDAI/Thuvien/backend/ai_text2sql.py):
+Để LLM sinh câu lệnh SQL chính xác 100% mà không bị lỗi tên cột (Hallucination) và không làm lộ dữ liệu mật, hệ thống sử dụng kỹ thuật **Schema Pruning (Tỉa gọn Schema)** khi đưa vào `DATABASE_SCHEMA_PROMPT` trong [`backend/ai_text2sql.py`](../backend/ai_text2sql.py):
 - Chỉ cung cấp tên bảng, tên cột nghiệp vụ và các giá trị `ENUM` tiếng Việt thực tế (`'Sẵn sàng'`, `'Hết sách'`, `'Chờ duyệt'`, `'Đang mượn'`, `'Đã trả'`).
 - **Ẩn hoàn toàn cột `password_hash`** khỏi `DATABASE_SCHEMA_PROMPT` gửi cho LLM, kết hợp thêm bộ lọc Regex tại tầng Backend chặn mọi truy vấn cố tình chạm vào từ khóa `password` hoặc `password_hash`.
 
@@ -322,7 +322,7 @@ Bảng chuyên biệt lưu trữ đầu ra của thuật toán dự báo nhu c�
 
 ## 6. TẬP LỆNH SQL DDL KHỞI TẠO CSDL MYSQL 8.0
 
-Tập lệnh khởi tạo đầy đủ 6 bảng cốt lõi và dữ liệu mẫu nằm tại [`database/smartlib_mysql.sql`](file:///d:/UDAI/Thuvien/database/smartlib_mysql.sql), và bảng thứ 7 (`ai_procurement`) cùng các cột Anomaly Detection được khởi tạo tự động qua migration trong [`backend/predictive_analysis.py`](file:///d:/UDAI/Thuvien/backend/predictive_analysis.py) và [`backend/anomaly_detection.py`](file:///d:/UDAI/Thuvien/backend/anomaly_detection.py).
+Tập lệnh khởi tạo đầy đủ 6 bảng cốt lõi và dữ liệu mẫu nằm tại [`database/smartlib_mysql.sql`](../database/smartlib_mysql.sql), và bảng thứ 7 (`ai_procurement`) cùng các cột Anomaly Detection được khởi tạo tự động qua migration trong [`backend/predictive_analysis.py`](../backend/predictive_analysis.py) và [`backend/anomaly_detection.py`](../backend/anomaly_detection.py).
 
 ---
 

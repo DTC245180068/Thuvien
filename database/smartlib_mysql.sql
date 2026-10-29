@@ -1,7 +1,7 @@
 -- =====================================================================
 -- SMARTLIB - HỆ THỐNG QUẢN LÝ THƯ VIỆN THÔNG MINH
 -- CƠ SỞ DỮ LIỆU MYSQL 8.0 CHUẨN 3NF TOÀN DIỆN (SYNCHRONIZED)
--- Thời gian cập nhật tự động: 2026-10-29 22:06:26
+-- Thời gian cập nhật tự động: 2026-10-29 23:54:52
 -- =====================================================================
 CREATE DATABASE IF NOT EXISTS `smartlib_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE `smartlib_db`;
@@ -163,7 +163,8 @@ VALUES
   (4, 'tester99', '123', 'Nguyễn Văn Test', 'Reader', 'test@smartlib.vn', '0912345678', '', NULL, 1, 1, 'Tạm khóa kiểm tra'),
   (5, 'tester_active', '123', 'Nguyễn Văn Test', 'Reader', 'tester@smartlib.vn', '0912345678', '', NULL, 1, 0, NULL),
   (6, 'test_54793c', '123', 'Nguyễn Văn Test', 'Reader', 'test_54793c@smartlib.vn', '0912345678', '', NULL, 1, 0, NULL),
-  (7, 'test_871053', '123', 'Nguyễn Văn Test', 'Reader', 'test_871053@smartlib.vn', '0912345678', '', NULL, 1, 0, NULL);
+  (7, 'test_871053', '123', 'Nguyễn Văn Test', 'Reader', 'test_871053@smartlib.vn', '0912345678', '', NULL, 1, 0, NULL),
+  (8, 'test_ae8c37', '123', 'Nguyễn Văn Test', 'Reader', 'test_ae8c37@smartlib.vn', '0912345678', '', NULL, 1, 0, NULL);
 
 -- =====================================================================
 -- DỮ LIỆU SEED KHỞI TẠO: 2. KHO SÁCH (books - 60 ĐẦU SÁCH)
@@ -248,7 +249,8 @@ VALUES
   (10, 4, 1, '2026-10-29 01:38:17', '2026-11-12 01:38:17', NULL, 'Mượn về nhà', 0.0, 0, 'Chờ duyệt', NULL, NULL, NULL, NULL, 0),
   (11, 4, 1, '2026-10-29 01:38:55', '2026-11-12 00:00:00', '2026-10-29 01:45:46', 'Mượn về nhà', 0.0, 0, 'Đã trả', NULL, NULL, NULL, NULL, 0),
   (12, 6, 1, '2026-10-29 01:47:36', '2026-11-12 00:00:00', '2026-10-29 01:47:37', 'Mượn về nhà', 0.0, 0, 'Đã trả', NULL, NULL, NULL, NULL, 0),
-  (13, 7, 1, '2026-10-29 22:06:24', '2026-11-12 00:00:00', '2026-10-29 22:06:25', 'Mượn về nhà', 0.0, 0, 'Đã trả', NULL, NULL, NULL, NULL, 0);
+  (13, 7, 1, '2026-10-29 22:06:24', '2026-11-12 00:00:00', '2026-10-29 22:06:25', 'Mượn về nhà', 0.0, 0, 'Đã trả', NULL, NULL, NULL, NULL, 0),
+  (14, 8, 1, '2026-10-29 23:54:51', '2026-11-12 00:00:00', '2026-10-29 23:54:51', 'Mượn về nhà', 0.0, 0, 'Đã trả', NULL, NULL, NULL, NULL, 0);
 
 -- =====================================================================
 -- DỮ LIỆU SEED KHỞI TẠO: 4. HÀNG ĐỢI ĐẶT TRƯỚC SÁCH (reservations)
@@ -260,7 +262,8 @@ VALUES
   (3, 2, 6, '2026-09-15 12:39:22', 1, '2026-09-19 14:45:59', 'Waiting'),
   (4, 4, 54, '2026-10-29 01:38:56', 1, '2026-10-31 01:38:56', 'Waiting'),
   (5, 6, 54, '2026-10-29 01:47:37', 2, '2026-10-31 01:47:37', 'Waiting'),
-  (6, 7, 54, '2026-10-29 22:06:25', 3, '2026-10-31 22:06:25', 'Waiting');
+  (6, 7, 54, '2026-10-29 22:06:25', 3, '2026-10-31 22:06:25', 'Waiting'),
+  (7, 8, 54, '2026-10-29 23:54:51', 4, '2026-10-31 23:54:51', 'Waiting');
 
 -- =====================================================================
 -- DỮ LIỆU SEED KHỞI TẠO: 5. QUẢN LÝ TIỀN PHẠT & VI PHẠM (fines)
@@ -274,6 +277,13 @@ VALUES
 -- =====================================================================
 INSERT INTO notifications (id, recipient_role, recipient_user_id, title, message, type, is_read, meta_json, created_at)
 VALUES
+  (167, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Nguyễn Văn Test vừa đặt trước cuốn "Black Clover: Đại Chiến Ma Pháp" (Hàng chờ #4).', 'reservation_created', 0, '{}', '2026-10-29 16:54:52'),
+  (166, 'Reader', 8, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Black Clover: Đại Chiến Ma Pháp". Vị trí hàng chờ: #4. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 0, '{}', '2026-10-29 16:54:52'),
+  (165, 'Admin', NULL, 'Độc giả đã trả sách', 'Độc giả Nguyễn Văn Test đã trả cuốn "Lập Trình Python Cơ Bản Đến Nâng Cao".', 'book_returned', 0, '{}', '2026-10-29 16:54:51'),
+  (164, 'Reader', 8, 'Xác nhận trả sách thành công', 'Bạn đã hoàn tất trả cuốn sách "Lập Trình Python Cơ Bản Đến Nâng Cao". Bạn đã trả đúng hạn!', 'book_returned', 0, '{}', '2026-10-29 16:54:51'),
+  (163, 'Reader', 8, 'Yêu cầu mượn sách đã được duyệt', 'Yêu cầu mượn cuốn sách "Lập Trình Python Cơ Bản Đến Nâng Cao" của bạn đã được duyệt thành công!', 'borrow_approved', 1, '{}', '2026-10-29 16:54:51'),
+  (162, 'Reader', 8, 'Yêu cầu mượn sách đang chờ duyệt', 'Yêu cầu mượn cuốn sách "Lập Trình Python Cơ Bản Đến Nâng Cao" của bạn đã được gửi thành công và đang chờ thủ thư phê duyệt.', 'borrow_request', 1, '{}', '2026-10-29 16:54:51'),
+  (161, 'Admin', NULL, 'Yêu cầu mượn sách mới', 'Độc giả Nguyễn Văn Test vừa gửi yêu cầu mượn cuốn sách "Lập Trình Python Cơ Bản Đến Nâng Cao" (Mượn về nhà).', 'borrow_request', 1, '{}', '2026-10-29 16:54:51'),
   (160, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Nguyễn Văn Test vừa đặt trước cuốn "Black Clover: Đại Chiến Ma Pháp" (Hàng chờ #3).', 'reservation_created', 0, '{}', '2026-10-29 15:06:26'),
   (159, 'Reader', 7, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Black Clover: Đại Chiến Ma Pháp". Vị trí hàng chờ: #3. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 0, '{}', '2026-10-29 15:06:26'),
   (158, 'Admin', NULL, 'Độc giả đã trả sách', 'Độc giả Nguyễn Văn Test đã trả cuốn "Lập Trình Python Cơ Bản Đến Nâng Cao".', 'book_returned', 0, '{}', '2026-10-29 15:06:25'),
@@ -316,11 +326,4 @@ VALUES
   (121, 'Reader', 2, 'Yêu cầu gia hạn đã được duyệt ✓', 'Yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày đã được duyệt thành công! Hạn trả mới: 2026-10-07.', 'renew_approved', 1, '{}', '2026-09-17 04:06:24'),
   (120, 'Reader', 2, 'Yêu cầu gia hạn đang chờ duyệt', 'Yêu cầu gia hạn thêm 7 ngày cho cuốn sách "Tư Duy Mở" đã được gửi và đang chờ thủ thư phê duyệt.', 'renew_pending', 1, '{}', '2026-09-17 04:06:02'),
   (119, 'Admin', NULL, 'Yêu cầu gia hạn mượn sách mới', 'Độc giả Trần Thị Mai đã gửi yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày. Chờ phê duyệt!', 'renew_request', 1, '{}', '2026-09-17 04:06:02'),
-  (118, 'Reader', 2, 'Yêu cầu gia hạn đã được duyệt ✓', 'Yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày đã được duyệt thành công! Hạn trả mới: 2026-10-07.', 'renew_approved', 1, '{}', '2026-09-17 04:04:51'),
-  (117, 'Reader', 2, 'Yêu cầu gia hạn đang chờ duyệt', 'Yêu cầu gia hạn thêm 7 ngày cho cuốn sách "Tư Duy Mở" đã được gửi và đang chờ thủ thư phê duyệt.', 'renew_pending', 1, '{}', '2026-09-17 04:04:46'),
-  (116, 'Admin', NULL, 'Yêu cầu gia hạn mượn sách mới', 'Độc giả Trần Thị Mai đã gửi yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày. Chờ phê duyệt!', 'renew_request', 1, '{}', '2026-09-17 04:04:46'),
-  (115, 'Reader', 2, 'Yêu cầu gia hạn đang chờ duyệt', 'Yêu cầu gia hạn thêm 7 ngày cho cuốn sách "Tư Duy Mở" đã được gửi và đang chờ thủ thư phê duyệt.', 'renew_pending', 1, '{}', '2026-09-17 03:30:45'),
-  (114, 'Admin', NULL, 'Yêu cầu gia hạn mượn sách mới', 'Độc giả Trần Thị Mai đã gửi yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày. Chờ phê duyệt!', 'renew_request', 1, '{}', '2026-09-17 03:30:45'),
-  (113, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ma Thuật Đặc Biệt Của Pháp Sư Tái Sinh" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 03:30:35'),
-  (112, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ma Thuật Đặc Biệt Của Pháp Sư Tái Sinh". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 03:30:35'),
-  (111, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 03:30:32');
+  (118, 'Reader', 2, 'Yêu cầu gia hạn đã được duyệt ✓', 'Yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày đã được duyệt thành công! Hạn trả mới: 2026-10-07.', 'renew_approved', 1, '{}', '2026-09-17 04:04:51');
