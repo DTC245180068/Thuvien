@@ -3,8 +3,13 @@
 -- CƠ SỞ DỮ LIỆU MYSQL 8.0 CHUẨN 3NF TOÀN DIỆN (SYNCHRONIZED)
 -- Thời gian cập nhật tự động: 2026-10-27 20:05:10
 -- =====================================================================
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
 CREATE DATABASE IF NOT EXISTS `smartlib_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE `smartlib_db`;
+
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS `notifications`;
@@ -69,6 +74,9 @@ CREATE TABLE borrow_records (
     pending_renew_days INT NULL,
     pending_renew_notes VARCHAR(255) NULL,
     renew_count INT NOT NULL DEFAULT 0,
+    is_flagged TINYINT(1) NOT NULL DEFAULT 0,
+    anomaly_score DECIMAL(5,2) NULL DEFAULT 0.0,
+    anomaly_reason VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_borrow_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -221,7 +229,7 @@ VALUES
   (6, 2, 2, '2026-09-16 17:05:46', '2026-09-30 17:05:46', '2026-09-16 17:05:50', 'Mượn về nhà', 0.0, 0, 'Đã trả', NULL, NULL, NULL, NULL, 0),
   (7, 2, 2, '2026-09-16 17:39:20', '2026-09-30 17:39:20', NULL, 'Mượn về nhà', 0.0, 0, 'Đã hủy', NULL, NULL, NULL, NULL, 0),
   (8, 2, 2, '2026-09-16 17:52:31', '2026-09-30 17:52:31', '2026-09-16 17:58:23', 'Mượn về nhà', 0.0, 0, 'Đã trả', NULL, NULL, NULL, NULL, 0),
-  (9, 2, 2, '2026-09-16 17:59:23', '2026-10-07 17:59:23', NULL, 'Mượn về nhà', 0.0, 0, 'Đang mượn', 'Gia hạn +7 ngày: Xin gia han de hoc them', NULL, NULL, NULL, 1),
+  (9, 2, 2, '2026-09-16 17:59:23', '2026-11-15 17:00:00', NULL, 'Mượn về nhà', 0.0, 0, 'Đang mượn', 'Gia hạn +7 ngày: Xin gia han de hoc them', NULL, NULL, NULL, 1),
   (10, 4, 15, '2026-10-27 20:05:10', '2026-11-10 20:05:10', NULL, 'Mượn về nhà', 0.0, 0, 'Chờ duyệt', NULL, NULL, NULL, NULL, 0);
 
 -- =====================================================================
@@ -238,14 +246,17 @@ VALUES
 -- =====================================================================
 INSERT INTO fines (id, record_id, user_id, book_id, due_date, actual_return_date, fine_amount, status, payment_method, transaction_ref, paid_at, note)
 VALUES
-  (1, 2, 2, 1, '2026-08-25 17:00:00', '2026-08-26 10:00:00', 2000.0, 'Đã nộp', 'Chuyển khoản VNPay', 'VNP178905221000', '2026-08-26 10:30:00', 'Trễ hạn 1 ngày - Đã thanh toán nộp phạt thành công');
+  (1, 2, 2, 1, '2026-08-25 17:00:00', '2026-08-26 10:00:00', 2000.0, 'Đã nộp', 'VNPay', 'VNP1792923795_2_106', '2026-10-27 13:12:23', 'Trễ hạn 1 ngày - Đã thanh toán nộp phạt thành công');
 
 -- =====================================================================
 -- DỮ LIỆU SEED KHỞI TẠO: 6. THÔNG BÁO HỆ THỐNG (notifications)
 -- =====================================================================
 INSERT INTO notifications (id, recipient_role, recipient_user_id, title, message, type, is_read, meta_json, created_at)
 VALUES
-  (126, 'Admin', NULL, 'Độc giả mới đăng ký', 'Độc giả Nguyễn Trung Học (@trunghoc2026) vừa tạo tài khoản trên hệ thống.', 'reader_registered', 0, '{}', '2026-10-27 13:02:26'),
+  (129, 'Reader', 2, 'Quản trị viên đã duyệt nộp phạt 🎉', 'Quản trị viên đã duyệt giao dịch nộp phạt 2,000 đ cho cuốn sách "Lập Trình Python Cơ Bản Đến Nâng Cao". Tài khoản của bạn đã được MỞ KHÓA hoàn toàn và có thể đăng nhập bình thường!', 'fine_approved', 0, '{}', '2026-10-27 13:12:23'),
+  (128, 'Reader', 2, 'Đã gửi xác nhận nộp phạt VNPay ⏳', 'Giao dịch VNPay #VNP1792923795_2_106 số tiền 10,000 đ đã được tiếp nhận và đang chờ Quản trị viên duyệt. Tài khoản sẽ được mở sau khi duyệt.', 'fine_submitted_vnpay', 0, '{}', '2026-10-25 10:23:19'),
+  (127, 'Librarian', NULL, '🔔 Yêu cầu duyệt nộp phạt VNPay', 'Độc giả Trần Thị Mai (ID: 2) đã thanh toán VNPay 10,000 đ (Mã GD: #VNP1792923795_2_106). Chờ quản trị viên duyệt.', 'fine_pending_approval', 1, '{}', '2026-10-25 10:23:19'),
+  (126, 'Admin', NULL, '🔔 Yêu cầu duyệt nộp phạt VNPay', 'Độc giả Trần Thị Mai (ID: 2) đã gửi xác nhận thanh toán VNPay 10,000 đ (Mã GD: #VNP1792923795_2_106). Vui lòng kiểm tra và duyệt!', 'fine_pending_approval', 1, '{}', '2026-10-25 10:23:19'),
   (125, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ao no Hako Season 2" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 07:45:59'),
   (124, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ao no Hako Season 2". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 0, '{}', '2026-09-17 07:45:59'),
   (123, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 07:45:56'),
