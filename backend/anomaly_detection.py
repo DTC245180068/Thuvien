@@ -49,6 +49,18 @@ class AnomalyRecordResponse(BaseModel):
     anomaly_reason: str = ""
 
 
+def _parse_iso_dt(dt_str: Optional[str]) -> Optional[datetime]:
+    if not dt_str:
+        return None
+    try:
+        clean = str(dt_str).strip().replace("Z", "").replace(" ", "T")
+        if "+" in clean:
+            clean = clean.split("+")[0]
+        return datetime.fromisoformat(clean)
+    except Exception:
+        return None
+
+
 def run_anomaly_detection_scan() -> Dict[str, Any]:
     """
     Thực thi quy tắc kiểm tra bất thường trên bảng borrow_records:
@@ -71,9 +83,9 @@ def run_anomaly_detection_scan() -> Dict[str, Any]:
         r_status = r.get("status", "")
 
         if r_status in ["Đã trả", "Completed"] and b_date_str and r_date_str:
-            try:
-                b_dt = datetime.fromisoformat(b_date_str.replace("Z", ""))
-                r_dt = datetime.fromisoformat(r_date_str.replace("Z", ""))
+            b_dt = _parse_iso_dt(b_date_str)
+            r_dt = _parse_iso_dt(r_date_str)
+            if b_dt and r_dt:
                 duration_minutes = (r_dt - b_dt).total_seconds() / 60.0
 
                 # Nếu mượn và trả trong vòng dưới 15 phút
@@ -83,8 +95,6 @@ def run_anomaly_detection_scan() -> Dict[str, Any]:
                         score,
                         f"Bất thường thời gian: Mượn và trả sách chỉ trong {duration_minutes:.1f} phút (< 15 phút)."
                     )
-            except Exception:
-                pass
 
     # -------------------------------------------------------------
     # QUY TẮC 2: MỘT USER CÓ 5 CUỐN LIÊN TIẾP BÁO MẤT (BaoMat)
@@ -238,7 +248,7 @@ def trigger_manual_scan():
     result = run_anomaly_detection_scan()
     return {
         "success": True,
-        "message": f"Đã quét xong toàn bộ {result['total_checked']} giao dịch. Phát hiện {result['total_anomalies_detected']} giao dịch bất thường.",
+        "message": "Đã quét thành công",
         "data": result
     }
 
@@ -276,130 +286,3 @@ def resolve_anomaly(record_id: int):
 
     return {"success": True, "message": f"Đã gỡ cờ cảnh báo cho phiếu mượn #{record_id}."}
 
-
-@router.post("/anomalies/simulate-test-data")
-def simulate_test_anomalies():
-    """
-    Tạo sẵn các dữ liệu vi phạm mẫu để Admin kiểm thử trực tiếp cả 2 quy tắc:
-    1. Phiếu mượn - trả siêu tốc dưới 5 phút
-    2. Một độc giả báo mất 5 cuốn sách liên tiếp
-    """
-    now = datetime.utcnow()
-    test_records = [
-        # Quy tắc 1: Mượn lúc 10:00, trả lúc 10:04 (4 phút)
-        {
-            "user_id": 2,
-            "book_id": 3,
-            "borrow_date": (now - timedelta(hours=2)).isoformat(),
-            "due_date": (now + timedelta(days=14)).isoformat(),
-            "actual_return_date": (now - timedelta(hours=2) + timedelta(minutes=4)).isoformat(),
-            "borrow_type": "Đọc tại chỗ",
-            "status": "Đã trả",
-            "notes": "Kiểm tra trả sách nhanh",
-            "is_flagged": True,
-            "anomaly_score": 0.92,
-            "anomaly_reason": "Bất thường thời gian: Mượn và trả sách chỉ trong 4.0 phút (< 15 phút)."
-        },
-        # Quy tắc 2: Độc giả ID 2 báo mất 5 cuốn sách
-        {
-            "user_id": 2,
-            "book_id": 1,
-            "borrow_date": (now - timedelta(days=10)).isoformat(),
-            "due_date": (now + timedelta(days=4)).isoformat(),
-            "actual_return_date": None,
-            "borrow_type": "Mượn về nhà",
-            "status": "Báo mất",
-            "notes": "Độc giả làm mất sách trên xe buýt",
-            "is_flagged": True,
-            "anomaly_score": 0.95,
-            "anomaly_reason": "Rủi ro gian lận cao: Độc giả 'Trần Thị Mai' có 5 cuốn sách liên tiếp ở trạng thái Báo mất!"
-        },
-        {
-            "user_id": 2,
-            "book_id": 2,
-            "borrow_date": (now - timedelta(days=9)).isoformat(),
-            "due_date": (now + timedelta(days=5)).isoformat(),
-            "actual_return_date": None,
-            "borrow_type": "Mượn về nhà",
-            "status": "Báo mất",
-            "notes": "Báo mất sách",
-            "is_flagged": True,
-            "anomaly_score": 0.95,
-            "anomaly_reason": "Rủi ro gian lận cao: Độc giả 'Trần Thị Mai' có 5 cuốn sách liên tiếp ở trạng thái Báo mất!"
-        },
-        {
-            "user_id": 2,
-            "book_id": 4,
-            "borrow_date": (now - timedelta(days=8)).isoformat(),
-            "due_date": (now + timedelta(days=6)).isoformat(),
-            "actual_return_date": None,
-            "borrow_type": "Mượn về nhà",
-            "status": "BaoMat",
-            "notes": "Báo mất lần 3",
-            "is_flagged": True,
-            "anomaly_score": 0.95,
-            "anomaly_reason": "Rủi ro gian lận cao: Độc giả 'Trần Thị Mai' có 5 cuốn sách liên tiếp ở trạng thái Báo mất!"
-        },
-        {
-            "user_id": 2,
-            "book_id": 5,
-            "borrow_date": (now - timedelta(days=7)).isoformat(),
-            "due_date": (now + timedelta(days=7)).isoformat(),
-            "actual_return_date": None,
-            "borrow_type": "Mượn về nhà",
-            "status": "BaoMat",
-            "notes": "Báo mất lần 4",
-            "is_flagged": True,
-            "anomaly_score": 0.95,
-            "anomaly_reason": "Rủi ro gian lận cao: Độc giả 'Trần Thị Mai' có 5 cuốn sách liên tiếp ở trạng thái Báo mất!"
-        },
-        {
-            "user_id": 2,
-            "book_id": 6,
-            "borrow_date": (now - timedelta(days=6)).isoformat(),
-            "due_date": (now + timedelta(days=8)).isoformat(),
-            "actual_return_date": None,
-            "borrow_type": "Mượn về nhà",
-            "status": "Báo mất",
-            "notes": "Báo mất lần 5",
-            "is_flagged": True,
-            "anomaly_score": 0.95,
-            "anomaly_reason": "Rủi ro gian lận cao: Độc giả 'Trần Thị Mai' có 5 cuốn sách liên tiếp ở trạng thái Báo mất!"
-        }
-    ]
-
-    engine = (
-        db_manager.mysql_mgr.engine
-        if (db_manager.mysql_mgr.is_connected() and db_manager.mysql_mgr.engine)
-        else db_manager.mysql_mgr.sqlite_engine
-    )
-
-    inserted = 0
-    if engine:
-        insert_sql = """
-        INSERT INTO borrow_records (
-            user_id, book_id, borrow_date, due_date, actual_return_date,
-            borrow_type, status, notes, is_flagged, anomaly_score, anomaly_reason, created_at
-        ) VALUES (
-            :user_id, :book_id, :borrow_date, :due_date, :actual_return_date,
-            :borrow_type, :status, :notes, :is_flagged, :anomaly_score, :anomaly_reason, :created_at
-        );
-        """
-        try:
-            with engine.connect() as conn:
-                for tr in test_records:
-                    tr_copy = dict(tr)
-                    tr_copy["created_at"] = now
-                    conn.execute(text(insert_sql), tr_copy)
-                    inserted += 1
-                conn.commit()
-        except Exception as e:
-            print(f"[Simulate Anomalies] Error: {e}")
-
-    # Chạy quét lại ngay lập tức
-    run_anomaly_detection_scan()
-    return {
-        "success": True,
-        "message": f"Đã khởi tạo {len(test_records)} giao dịch bất thường mẫu và kích hoạt AI Anomaly Detection!",
-        "count": len(test_records)
-    }

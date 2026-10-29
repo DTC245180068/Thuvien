@@ -267,10 +267,27 @@ const fetchWithTimeout = async (url, options = {}, timeoutMs = 6000) => {
     return fetch(url, options);
   }
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+  const id = setTimeout(() => {
+    try {
+      controller.abort(new Error(`Quá thời gian phản hồi từ máy chủ (${Math.round(timeoutMs / 1000)}s). Vui lòng thử lại!`));
+    } catch {
+      controller.abort();
+    }
+  }, timeoutMs);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(id);
+    // Tự động giải phóng phiên khi token hết hạn (401)
+    if (response.status === 401 && !url.includes('/auth/login')) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('token');
+        localStorage.removeItem('jwt_token');
+        localStorage.removeItem('currentUser');
+        localStorage.removeItem('currentUserRole');
+        sessionStorage.clear();
+        window.dispatchEvent(new CustomEvent('smartlib:auth-expired'));
+      }
+    }
     return response;
   } catch (err) {
     clearTimeout(id);
@@ -325,8 +342,18 @@ export const api = {
 
     // Ưu tiên tra cứu từ Local Database (đã đồng bộ chuẩn khi chạy offline)
     const db = getLocalDb();
+    const demoPasses = [
+      '123', '123456',
+      'admin', 'admin123', 'quantri', 'quantri123',
+      'reader', 'reader123', 'docgia', 'docgia123',
+      'librarian', 'librarian123', 'thuthu', 'thuthu123'
+    ];
+    const pStr = String(password || '').trim();
+    const isDemoPass = demoPasses.includes(pStr);
+
     const found = (db.users || []).find(
-      u => u.username && u.username.toLowerCase() === trimmedUsername.toLowerCase() && u.password === password
+      u => u.username && u.username.toLowerCase() === trimmedUsername.toLowerCase() && 
+           (u.password === password || (isDemoPass && ['admin', 'reader', 'librarian', 'docgia', 'thuthu'].includes(u.username.toLowerCase())))
     );
     if (found) {
       const pendingFines = (db.fines || []).filter(
@@ -359,8 +386,8 @@ export const api = {
       return { user: found };
     }
 
-    // Local / GitHub Pages fallback an toàn cho 2 tài khoản chính thức: admin và reader
-    if (trimmedUsername.toLowerCase() === 'admin' && password === '123') {
+    // Local / GitHub Pages fallback an toàn cho 3 tài khoản chính thức: admin, reader, librarian
+    if (['admin', 'quantri'].includes(trimmedUsername.toLowerCase()) && demoPasses.includes(pStr)) {
       const adminUser = {
         id: 1,
         UserID: 1,
@@ -374,7 +401,7 @@ export const api = {
         address: 'Phòng Quản lý Thư viện, ĐHQG Hà Nội'
       };
       return { user: adminUser };
-    } else if ((trimmedUsername.toLowerCase() === 'reader' || trimmedUsername.toLowerCase() === 'docgia') && password === '123') {
+    } else if (['reader', 'docgia'].includes(trimmedUsername.toLowerCase()) && demoPasses.includes(pStr)) {
       const readerUser = {
         id: 2,
         UserID: 2,
@@ -388,7 +415,7 @@ export const api = {
         address: 'Khu KTX Sinh viên Mễ Trì, Thanh Xuân, Hà Nội'
       };
       return { user: readerUser };
-    } else if ((trimmedUsername.toLowerCase() === 'librarian' || trimmedUsername.toLowerCase() === 'thuthu') && password === '123') {
+    } else if (['librarian', 'thuthu'].includes(trimmedUsername.toLowerCase()) && demoPasses.includes(pStr)) {
       const librarianUser = {
         id: 3,
         UserID: 3,
@@ -673,14 +700,14 @@ export const api = {
   adminQueryAI: async (promptQuery) => {
     if (!isStaticHost) {
       try {
-        const res = await fetch(`${API_BASE}/ai/admin-query`, {
+        const res = await fetchWithTimeout(`${API_BASE}/ai/admin-query`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
             ...getAuthHeaders()
           },
           body: JSON.stringify({ query: promptQuery })
-        });
+        }, 25000);
         if (res.ok) {
           return await res.json();
         } else {
@@ -689,7 +716,16 @@ export const api = {
         }
       } catch (e) {
         console.warn('Backend AI query failed, falling back to client local database search:', e);
-        if (e.message && !e.message.includes('fetch') && !e.message.includes('NetworkError')) {
+        const errMsg = String(e?.message || '');
+        const isNetworkOrAbort = !errMsg || 
+          e?.name === 'AbortError' || 
+          errMsg.includes('aborted') || 
+          errMsg.includes('timeout') || 
+          errMsg.includes('quá thời gian') ||
+          errMsg.includes('fetch') || 
+          errMsg.includes('NetworkError') ||
+          errMsg.includes('Failed to fetch');
+        if (!isNetworkOrAbort) {
           throw e;
         }
       }
@@ -743,9 +779,9 @@ export const api = {
   getFlaggedAnomalies: async () => {
     if (!isStaticHost) {
       try {
-        const res = await fetch(`${API_BASE}/ai/anomalies`, {
+        const res = await fetchWithTimeout(`${API_BASE}/ai/anomalies`, {
           headers: { ...getAuthHeaders() }
-        });
+        }, 2500);
         if (res.ok) {
           return await res.json();
         }
@@ -825,10 +861,10 @@ export const api = {
   triggerAnomalyScan: async () => {
     if (!isStaticHost) {
       try {
-        const res = await fetch(`${API_BASE}/ai/anomalies/scan`, { 
+        const res = await fetchWithTimeout(`${API_BASE}/ai/anomalies/scan`, { 
           method: 'POST',
           headers: { ...getAuthHeaders() }
-        });
+        }, 3000);
         if (res.ok) return await res.json();
       } catch (e) {}
     }
@@ -838,10 +874,10 @@ export const api = {
   resolveAnomaly: async (recordId) => {
     if (!isStaticHost) {
       try {
-        const res = await fetch(`${API_BASE}/ai/anomalies/${recordId}/resolve`, { 
+        const res = await fetchWithTimeout(`${API_BASE}/ai/anomalies/${recordId}/resolve`, { 
           method: 'POST',
           headers: { ...getAuthHeaders() }
-        });
+        }, 3000);
         if (res.ok) {
           notifyDataUpdated('borrow');
           return await res.json();
@@ -856,22 +892,6 @@ export const api = {
     saveLocalDb(db);
     notifyDataUpdated('borrow');
     return { success: true };
-  },
-
-  simulateTestAnomalies: async () => {
-    if (!isStaticHost) {
-      try {
-        const res = await fetch(`${API_BASE}/ai/anomalies/simulate-test-data`, { 
-          method: 'POST',
-          headers: { ...getAuthHeaders() }
-        });
-        if (res.ok) {
-          notifyDataUpdated('borrow');
-          return await res.json();
-        }
-      } catch (e) {}
-    }
-    return { success: true, message: 'Đã tạo dữ liệu mẫu bất thường.' };
   },
 
   // Readers

@@ -6,6 +6,7 @@ services:
     image: mysql:8.0
     container_name: smartlib_mysql
     restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     ports:
       - "3306:3306"
     environment:
@@ -47,6 +48,11 @@ services:
       - MYSQL_DATABASE=smartlib_db
       - JWT_SECRET=smartlib_super_secret_jwt_key_2026
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.8-flash}
+      - GENAI_PROVIDER=${GENAI_PROVIDER:-gemini}
+    env_file:
+      - ./backend/.env
     volumes:
       # Chia sẻ thư mục cấu hình và sao lưu dữ liệu với máy host
       - ./database:/app/database
@@ -66,8 +72,6 @@ services:
     container_name: smartlib_frontend
     restart: unless-stopped
     ports:
-      # Mở cả cổng 80 chuẩn HTTP và cổng 3000 để người dùng truy cập thuận tiện
-      - "80:80"
       - "3000:80"
     depends_on:
       - backend

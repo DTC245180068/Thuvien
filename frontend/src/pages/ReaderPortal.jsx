@@ -237,7 +237,7 @@ export default function ReaderPortal({ activeTab, onTabChange }) {
     ? fineFromFinesList 
     : overdueBorrows.reduce((sum, r) => sum + calculateBorrowFine(r), 0);
 
-  const isReaderLocked = Boolean(user?.isLocked || user?.is_locked || overdueBorrows.length > 0 || (unpaidFinesList.length > 0 && totalUnpaidFineAmount > 0));
+  const isReaderLocked = Boolean(user?.isLocked || user?.is_locked || (unpaidFinesList.length > 0 && totalUnpaidFineAmount > 0));
 
   let readerLockReason = user?.lockReason || '';
   if (!readerLockReason) {

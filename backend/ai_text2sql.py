@@ -6,9 +6,7 @@ Bảo mật: CHỈ CHO PHÉP CÂU LỆNH SELECT, CHẶN TUYỆT ĐỐI INSERT/UP
 
 import os
 import re
-import json
-import urllib.request
-import urllib.error
+import logging
 from datetime import datetime, date
 from decimal import Decimal
 from typing import List, Dict, Any, Optional
@@ -16,8 +14,12 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy import text
 
+logger = logging.getLogger("smartlib.text2sql")
+
 from database import db_manager
 from auth_dependency import verify_admin_role
+# [TÍCH HỢP] Thay urllib raw call bằng genai_client (retry + circuit breaker + moderation)
+from genai_client import call_llm_json, GenAIRequest, GenAIMessage, GenAIParams
 
 router = APIRouter(prefix="/api/ai", tags=["AI Text-to-SQL"], dependencies=[Depends(verify_admin_role)])
 
@@ -168,58 +170,57 @@ def validate_read_only_sql(sql: str) -> bool:
     return True
 
 
-def _translate_with_llm(user_prompt: str) -> Optional[dict]:
-    """Gọi OpenAI API để dịch câu hỏi tự nhiên sang SQL SELECT an toàn"""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+
+# ─── System prompt cho Text-to-SQL ───────────────────────────────────────────
+_TEXT2SQL_SYSTEM = f"""Bạn là Chuyên gia Database Administrator và AI Assistant của Hệ thống Quản lý Thư viện SmartLib.
+Nhiệm vụ: Chuyển đổi câu hỏi Tiếng Việt của Thủ thư thành câu truy vấn SQL SELECT duy nhất, chuẩn cú pháp MySQL.
+
+Quy tắc BẮT BUỘC:
+1. CHỈ tạo câu lệnh SELECT. Tuyệt đối KHÔNG dùng INSERT, UPDATE, DELETE, DROP, ALTER.
+2. Bảng và Cột phải khớp 100% với Schema sau:
+{DATABASE_SCHEMA_PROMPT}
+3. Luôn giới hạn tối đa 100 bản ghi (LIMIT 100).
+4. Trả về đúng JSON thuần, không markdown:
+{{
+  "sql": "SELECT ... LIMIT 100",
+  "explanation": "Mô tả ngắn gọn câu truy vấn trả về thông tin gì"
+}}"""
+
+
+async def _translate_with_llm(user_prompt: str) -> Optional[dict]:
+    """
+    [TÍCH HỢP] Dịch câu hỏi tiếng Việt sang SQL SELECT qua genai_client.
+    Thay thế urllib raw call cũ.
+    Hưởng lợi: Retry 429 (backoff jitter), Retry 5xx (tối đa 3 lần),
+               Circuit Breaker, JSON parse retry tự động.
+    """
+    # Không gọi LLM nếu không có API key — rơi về heuristic
+    has_key = bool(os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY"))
+    if not has_key:
         return None
 
     try:
-        system_instruction = f"""
-        Bạn là Chuyên gia Database Administrator và AI Assistant của Hệ thống Quản lý Thư viện SmartLib.
-        Nhiệm vụ của bạn là chuyển đổi câu hỏi bằng Tiếng Việt của Thủ thư thành câu truy vấn SQL SELECT duy nhất và chuẩn cú pháp.
-        
-        Quy tắc BẮT BUỘC:
-        1. CHỈ tạo câu lệnh SELECT. Tuyệt đối KHÔNG sử dụng INSERT, UPDATE, DELETE, DROP, ALTER.
-        2. Bảng và Cột phải khớp 100% với Schema dưới đây:
-        {DATABASE_SCHEMA_PROMPT}
-        3. Kết quả trả về đúng định dạng JSON:
-        {{
-           "sql": "SELECT ... LIMIT 100",
-           "explanation": "Mô tả ngắn gọn kết quả này lấy những thông tin gì để trả lời câu hỏi"
-        }}
-        4. Luôn giới hạn tối đa 100 bản ghi (LIMIT 100) để đảm bảo tốc độ.
-        5. Chỉ trả về JSON thuần, không bọc markdown.
-        """
-
-        payload = {
-            "model": "gpt-4o-mini",
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": 0.1,
-            "max_tokens": 500
-        }
-
-        req = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
+        req = GenAIRequest(
+            system_context=_TEXT2SQL_SYSTEM,
+            messages=[GenAIMessage(role="user", content=user_prompt)],
+            # temperature=0.1: gần như deterministic → SQL ổn định, ít thay đổi mỗi lần gọi
+            params=GenAIParams(temperature=0.1, max_tokens=500)
         )
+        # [TÍCH HỢP] call_llm_json: parse JSON + retry JSON parse 2 lần + fallback raw text
+        result = await call_llm_json(req)
 
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            resp_data = json.loads(resp.read().decode("utf-8"))
-            content = resp_data["choices"][0]["message"]["content"].strip()
-            content = re.sub(r"^```json\s*", "", content)
-            content = re.sub(r"\s*```$", "", content)
-            return json.loads(content)
+        # Nếu parse JSON thất bại hoàn toàn → result có "parse_error" → dùng heuristic
+        if "parse_error" in result or "sql" not in result:
+            logger.warning("[Text-to-SQL] LLM JSON parse failed, falling back to heuristic.")
+            return None
+
+        return result
+
     except Exception as e:
-        print(f"[Text-to-SQL] OpenAI translation failed: {e}")
+        logger.warning(f"[Text-to-SQL] genai_client call failed: {type(e).__name__}")
         return None
+
+
 
 
 def _translate_heuristic(prompt: str) -> dict:
@@ -228,6 +229,13 @@ def _translate_heuristic(prompt: str) -> dict:
     Đảm bảo chatbot luôn hoạt động xuất sắc ngay cả khi chưa cấu hình API Key.
     """
     p = prompt.lower().strip()
+
+    # 0. Lời chào hỏi thông thường
+    if p in ["hello", "hi", "xin chào", "chào", "chào bạn", "alo", "test", "hey"]:
+        return {
+            "sql": "SELECT id AS ma_sach, title AS ten_sach, author AS tac_gia, category AS the_loai, available_copies AS con_san FROM books ORDER BY id DESC LIMIT 5",
+            "explanation": "Xin chào! Tôi là Trợ lý AI Text-to-SQL. Bạn có thể hỏi tôi về sách quá hạn, độc giả bị khóa, số lượng sách trong kho... Dưới đây là 5 cuốn sách mới nhất trong kho thư viện."
+        }
 
     # 1. Sách quá hạn
     if any(k in p for k in ["quá hạn", "trễ hạn", "chưa trả quá ngày", "hết hạn"]):
@@ -427,8 +435,8 @@ async def handle_admin_query(req: AdminQueryRequest):
         sql = direct_sql
         explanation = "Thực thi truy vấn SQL được cung cấp."
     else:
-        # 1. Thử dịch bằng LLM (OpenAI API nếu có)
-        translated = _translate_with_llm(user_prompt)
+        # 1. Thử dịch bằng LLM qua genai_client (retry + circuit breaker)
+        translated = await _translate_with_llm(user_prompt)
 
         # 2. Fallback: Nếu không có LLM
         if not translated or not translated.get("sql"):

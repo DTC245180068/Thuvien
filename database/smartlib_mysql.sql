@@ -1,10 +1,15 @@
 -- =====================================================================
 -- SMARTLIB - HỆ THỐNG QUẢN LÝ THƯ VIỆN THÔNG MINH
 -- CƠ SỞ DỮ LIỆU MYSQL 8.0 CHUẨN 3NF TOÀN DIỆN (SYNCHRONIZED)
--- Thời gian cập nhật tự động: 2026-09-17 15:44:25
+-- Thời gian cập nhật tự động: 2026-10-27 13:25:03
 -- =====================================================================
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
 CREATE DATABASE IF NOT EXISTS `smartlib_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE `smartlib_db`;
+
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS `notifications`;
@@ -69,6 +74,9 @@ CREATE TABLE borrow_records (
     pending_renew_days INT NULL,
     pending_renew_notes VARCHAR(255) NULL,
     renew_count INT NOT NULL DEFAULT 0,
+    is_flagged TINYINT(1) NOT NULL DEFAULT 0,
+    anomaly_score DECIMAL(5,2) NULL DEFAULT 0.0,
+    anomaly_reason VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_borrow_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -220,46 +228,76 @@ VALUES
   (6, 2, 2, '2026-09-16 17:05:46', '2026-09-30 17:05:46', '2026-09-16 17:05:50', 'Mượn về nhà', 0.0, 0, 'Đã trả', NULL, NULL, NULL, NULL, 0),
   (7, 2, 2, '2026-09-16 17:39:20', '2026-09-30 17:39:20', NULL, 'Mượn về nhà', 0.0, 0, 'Đã hủy', NULL, NULL, NULL, NULL, 0),
   (8, 2, 2, '2026-09-16 17:52:31', '2026-09-30 17:52:31', '2026-09-16 17:58:23', 'Mượn về nhà', 0.0, 0, 'Đã trả', NULL, NULL, NULL, NULL, 0),
-  (9, 2, 2, '2026-09-16 17:59:23', '2026-10-07 17:59:23', NULL, 'Mượn về nhà', 0.0, 0, 'Đang mượn', 'Gia hạn +7 ngày: Xin gia han de hoc them', NULL, NULL, NULL, 1);
+  (9, 2, 2, '2026-09-16 17:59:23', '2026-11-15 17:00:00', NULL, 'Mượn về nhà', 0.0, 0, 'Đang mượn', 'Gia hạn +7 ngày: Xin gia han de hoc them', NULL, NULL, NULL, 1);
 
 -- =====================================================================
 -- DỮ LIỆU SEED KHỞI TẠO: 4. HÀNG ĐỢI ĐẶT TRƯỚC SÁCH (reservations)
 -- =====================================================================
 INSERT INTO reservations (id, user_id, book_id, reserved_at, priority, expires_at, status)
 VALUES
-  (1, 2, 53, '2026-09-17 10:30:34', 1, '2026-09-19 10:30:34', 'Waiting'),
-  (2, 2, 52, '2026-09-17 14:45:55', 1, '2026-09-19 14:45:55', 'Waiting'),
-  (3, 2, 51, '2026-09-17 14:45:59', 1, '2026-09-19 14:45:59', 'Waiting');
+  (1, 2, 51, '2026-09-09 14:00:00', 1, '2026-09-19 10:30:34', 'Waiting'),
+  (2, 2, 51, '2026-09-13 10:01:54', 1, '2026-09-19 14:45:55', 'Waiting'),
+  (3, 2, 6, '2026-09-15 12:39:22', 1, '2026-09-19 14:45:59', 'Waiting');
 
 -- =====================================================================
 -- DỮ LIỆU SEED KHỞI TẠO: 5. QUẢN LÝ TIỀN PHẠT & VI PHẠM (fines)
 -- =====================================================================
 INSERT INTO fines (id, record_id, user_id, book_id, due_date, actual_return_date, fine_amount, status, payment_method, transaction_ref, paid_at, note)
 VALUES
-  (1, 2, 2, 1, '2026-08-25 17:00:00', '2026-08-26 10:00:00', 2000.0, 'Đã nộp', 'Chuyển khoản VNPay', 'VNP178905221000', '2026-08-26 10:30:00', 'Trễ hạn 1 ngày - Đã thanh toán nộp phạt thành công');
+  (1, 2, 2, 1, '2026-08-25 17:00:00', '2026-08-26 10:00:00', 2000.0, 'Đã nộp', 'VNPay', 'VNP1792923795_2_106', '2026-10-27 13:12:23', 'Trễ hạn 1 ngày - Đã thanh toán nộp phạt thành công');
 
 -- =====================================================================
 -- DỮ LIỆU SEED KHỞI TẠO: 6. THÔNG BÁO HỆ THỐNG (notifications)
 -- =====================================================================
 INSERT INTO notifications (id, recipient_role, recipient_user_id, title, message, type, is_read, meta_json, created_at)
 VALUES
-  (1, 'Reader', 2, 'Yêu cầu mượn sách đang chờ duyệt', 'Yêu cầu mượn cuốn sách "Tư Duy Mở" của bạn đã được gửi thành công và đang chờ thủ thư phê duyệt.', 'borrow_request', 1, '{}', '2026-09-16 10:39:20'),
-  (2, 'Admin', NULL, 'Yêu cầu mượn sách mới', 'Độc giả Trần Thị Mai vừa gửi yêu cầu mượn cuốn sách "Tư Duy Mở" (Mượn về nhà).', 'borrow_request', 1, '{}', '2026-09-16 10:39:20'),
-  (3, 'Admin', NULL, 'Độc giả đã hủy yêu cầu mượn', 'Độc giả Trần Thị Mai đã hủy yêu cầu mượn cuốn sách "Tư Duy Mở".', 'borrow_rejected', 1, '{}', '2026-09-16 10:33:57'),
-  (4, 'Admin', NULL, 'Độc giả đã trả sách', 'Độc giả Trần Thị Mai đã trả cuốn "Tư Duy Mở".', 'book_returned', 1, '{}', '2026-09-16 10:05:50'),
-  (5, 'Reader', 2, 'Xác nhận trả sách thành công', 'Bạn đã hoàn tất trả cuốn sách "Tư Duy Mở". Bạn đã trả đúng hạn!', 'book_returned', 1, '{}', '2026-09-16 10:05:50'),
-  (6, 'Reader', 2, 'Yêu cầu mượn sách đã được duyệt', 'Yêu cầu mượn cuốn sách "Tư Duy Mở" của bạn đã được duyệt thành công!', 'borrow_approved', 1, '{}', '2026-09-16 10:05:48'),
-  (7, 'Reader', 2, 'Yêu cầu mượn sách đang chờ duyệt', 'Yêu cầu mượn cuốn sách "Tư Duy Mở" của bạn đã được gửi thành công và đang chờ thủ thư phê duyệt.', 'borrow_request', 1, '{}', '2026-09-16 10:05:46'),
-  (8, 'Admin', NULL, 'Yêu cầu mượn sách mới', 'Độc giả Trần Thị Mai vừa gửi yêu cầu mượn cuốn sách "Tư Duy Mở" (Mượn về nhà).', 'borrow_request', 1, '{}', '2026-09-16 10:05:46'),
-  (9, 'Reader', 2, 'Yêu cầu mượn sách đang chờ duyệt', 'Yêu cầu mượn cuốn sách "Tư Duy Mở" của bạn đã được gửi thành công và đang chờ thủ thư phê duyệt.', 'borrow_request', 1, '{}', '2026-09-16 10:05:23'),
-  (10, 'Admin', NULL, 'Yêu cầu mượn sách mới', 'Độc giả Trần Thị Mai vừa gửi yêu cầu mượn cuốn sách "Tư Duy Mở" (Mượn về nhà).', 'borrow_request', 1, '{}', '2026-09-16 10:05:23'),
-  (11, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Hoàng Tử Bé". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-16 10:05:15'),
-  (12, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Hoàng Tử Bé". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-15 12:39:23'),
-  (13, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ao no Hako Season 2 (Chiếc Hộp Xanh)". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-13 10:01:55'),
-  (14, 'Admin', NULL, 'Độc giả đã trả sách', 'Độc giả Trần Thị Mai đã trả cuốn "Tru Tiên".', 'book_returned', 1, '{}', '2026-09-11 11:35:11'),
-  (15, 'Reader', 2, 'Xác nhận trả sách thành công', 'Bạn đã hoàn tất trả cuốn sách "Tru Tiên". Bạn đã trả đúng hạn!', 'book_returned', 1, '{}', '2026-09-11 11:35:11'),
-  (16, 'Reader', 2, 'Yêu cầu mượn sách đã được duyệt', 'Yêu cầu mượn cuốn sách "Tru Tiên" của bạn đã được duyệt thành công!', 'borrow_approved', 1, '{}', '2026-09-11 11:34:53'),
-  (17, 'Admin', NULL, 'Độc giả đã trả sách', 'Độc giả Trần Thị Mai đã trả cuốn "Tư Duy Mở".', 'book_returned', 1, '{}', '2026-09-11 11:34:52'),
-  (18, 'Reader', 2, 'Xác nhận trả sách thành công', 'Bạn đã hoàn tất trả cuốn sách "Tư Duy Mở". Bạn đã trả đúng hạn!', 'book_returned', 1, '{}', '2026-09-11 11:34:52'),
-  (19, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ao no Hako Season 2 (Chiếc Hộp Xanh)". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-09 14:00:00'),
-  (20, 'Reader', 2, 'Xác nhận trả sách thành công', 'Bạn đã hoàn tất trả cuốn sách "Giáo Trình Triết Học Mác - Lênin". Cảm ơn bạn đã giữ gìn sách cẩn thận!', 'book_returned', 1, '{}', '2026-09-01 15:45:00');
+  (129, 'Reader', 2, 'Quản trị viên đã duyệt nộp phạt 🎉', 'Quản trị viên đã duyệt giao dịch nộp phạt 2,000 đ cho cuốn sách "Lập Trình Python Cơ Bản Đến Nâng Cao". Tài khoản của bạn đã được MỞ KHÓA hoàn toàn và có thể đăng nhập bình thường!', 'fine_approved', 0, '{}', '2026-10-27 13:12:23'),
+  (128, 'Reader', 2, 'Đã gửi xác nhận nộp phạt VNPay ⏳', 'Giao dịch VNPay #VNP1792923795_2_106 số tiền 10,000 đ đã được tiếp nhận và đang chờ Quản trị viên duyệt. Tài khoản sẽ được mở sau khi duyệt.', 'fine_submitted_vnpay', 0, '{}', '2026-10-25 10:23:19'),
+  (127, 'Librarian', NULL, '🔔 Yêu cầu duyệt nộp phạt VNPay', 'Độc giả Trần Thị Mai (ID: 2) đã thanh toán VNPay 10,000 đ (Mã GD: #VNP1792923795_2_106). Chờ quản trị viên duyệt.', 'fine_pending_approval', 1, '{}', '2026-10-25 10:23:19'),
+  (126, 'Admin', NULL, '🔔 Yêu cầu duyệt nộp phạt VNPay', 'Độc giả Trần Thị Mai (ID: 2) đã gửi xác nhận thanh toán VNPay 10,000 đ (Mã GD: #VNP1792923795_2_106). Vui lòng kiểm tra và duyệt!', 'fine_pending_approval', 1, '{}', '2026-10-25 10:23:19'),
+  (125, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ao no Hako Season 2" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 07:45:59'),
+  (124, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ao no Hako Season 2". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 0, '{}', '2026-09-17 07:45:59'),
+  (123, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 07:45:56'),
+  (122, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 0, '{}', '2026-09-17 07:45:56'),
+  (121, 'Reader', 2, 'Yêu cầu gia hạn đã được duyệt ✓', 'Yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày đã được duyệt thành công! Hạn trả mới: 2026-10-07.', 'renew_approved', 1, '{}', '2026-09-17 04:06:24'),
+  (120, 'Reader', 2, 'Yêu cầu gia hạn đang chờ duyệt', 'Yêu cầu gia hạn thêm 7 ngày cho cuốn sách "Tư Duy Mở" đã được gửi và đang chờ thủ thư phê duyệt.', 'renew_pending', 1, '{}', '2026-09-17 04:06:02'),
+  (119, 'Admin', NULL, 'Yêu cầu gia hạn mượn sách mới', 'Độc giả Trần Thị Mai đã gửi yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày. Chờ phê duyệt!', 'renew_request', 1, '{}', '2026-09-17 04:06:02'),
+  (118, 'Reader', 2, 'Yêu cầu gia hạn đã được duyệt ✓', 'Yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày đã được duyệt thành công! Hạn trả mới: 2026-10-07.', 'renew_approved', 1, '{}', '2026-09-17 04:04:51'),
+  (117, 'Reader', 2, 'Yêu cầu gia hạn đang chờ duyệt', 'Yêu cầu gia hạn thêm 7 ngày cho cuốn sách "Tư Duy Mở" đã được gửi và đang chờ thủ thư phê duyệt.', 'renew_pending', 1, '{}', '2026-09-17 04:04:46'),
+  (116, 'Admin', NULL, 'Yêu cầu gia hạn mượn sách mới', 'Độc giả Trần Thị Mai đã gửi yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày. Chờ phê duyệt!', 'renew_request', 1, '{}', '2026-09-17 04:04:46'),
+  (115, 'Reader', 2, 'Yêu cầu gia hạn đang chờ duyệt', 'Yêu cầu gia hạn thêm 7 ngày cho cuốn sách "Tư Duy Mở" đã được gửi và đang chờ thủ thư phê duyệt.', 'renew_pending', 1, '{}', '2026-09-17 03:30:45'),
+  (114, 'Admin', NULL, 'Yêu cầu gia hạn mượn sách mới', 'Độc giả Trần Thị Mai đã gửi yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày. Chờ phê duyệt!', 'renew_request', 1, '{}', '2026-09-17 03:30:45'),
+  (113, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ma Thuật Đặc Biệt Của Pháp Sư Tái Sinh" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 03:30:35'),
+  (112, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ma Thuật Đặc Biệt Của Pháp Sư Tái Sinh". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 03:30:35'),
+  (111, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 03:30:32'),
+  (110, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 03:30:32'),
+  (109, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ao no Hako Season 2" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 03:30:29'),
+  (108, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ao no Hako Season 2". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 03:30:29'),
+  (107, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 03:14:41'),
+  (106, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 03:14:41'),
+  (105, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ao no Hako Season 2" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 03:14:38'),
+  (104, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ao no Hako Season 2". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 03:14:38'),
+  (103, 'Reader', 2, '🎉 Sách đặt trước đã về kho!', 'Cuốn sách "Black Clover: Đại Chiến Ma Pháp" bạn đặt trước đã có sẵn tại thư viện. Bạn có 48 giờ để đến mượn sách!', 'reservation_ready', 1, '{}', '2026-09-17 03:09:25'),
+  (102, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Black Clover: Đại Chiến Ma Pháp" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 03:09:19'),
+  (101, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Black Clover: Đại Chiến Ma Pháp". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 03:09:19'),
+  (100, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 03:06:20'),
+  (99, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 03:06:20'),
+  (98, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 02:49:05'),
+  (97, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 02:49:04'),
+  (96, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ao no Hako Season 2" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 02:49:03'),
+  (95, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ao no Hako Season 2". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 02:49:03'),
+  (94, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 02:44:19'),
+  (93, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 02:44:19'),
+  (92, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ma Thuật Đặc Biệt Của Pháp Sư Tái Sinh" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 02:44:10'),
+  (91, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ma Thuật Đặc Biệt Của Pháp Sư Tái Sinh". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 02:44:10'),
+  (90, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 02:44:09'),
+  (89, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 02:44:09'),
+  (88, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ao no Hako Season 2" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 02:44:08'),
+  (87, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ao no Hako Season 2". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 02:44:08'),
+  (86, 'Reader', 2, 'Yêu cầu gia hạn đang chờ duyệt', 'Yêu cầu gia hạn thêm 7 ngày cho cuốn sách "Tư Duy Mở" đã được gửi và đang chờ thủ thư phê duyệt.', 'renew_pending', 1, '{}', '2026-09-17 02:43:16'),
+  (85, 'Admin', NULL, 'Yêu cầu gia hạn mượn sách mới', 'Độc giả Trần Thị Mai đã gửi yêu cầu gia hạn cuốn sách "Tư Duy Mở" thêm 7 ngày. Chờ phê duyệt!', 'renew_request', 1, '{}', '2026-09-17 02:43:16'),
+  (84, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 02:42:53'),
+  (83, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Tensei Kizoku, Kantei Skill de Nariagaru". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 02:42:53'),
+  (82, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ao no Hako Season 2" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 02:42:50'),
+  (81, 'Reader', 2, 'Đặt trước sách thành công', 'Bạn đã đặt trước cuốn "Ao no Hako Season 2". Vị trí hàng chờ: #1. Hệ thống sẽ thông báo khi sách sẵn sàng.', 'reservation_created', 1, '{}', '2026-09-17 02:42:50'),
+  (80, 'Admin', NULL, 'Độc giả đặt trước sách mới', 'Độc giả Trần Thị Mai vừa đặt trước cuốn "Ao no Hako Season 2" (Hàng chờ #1).', 'reservation_created', 1, '{}', '2026-09-17 02:38:55');

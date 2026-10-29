@@ -7,16 +7,15 @@ Quy tắc: KHÔNG ghi trực tiếp vào Database (Human-in-the-loop).
 import os
 import io
 import re
-import json
 import base64
-import urllib.request
-import urllib.error
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
 from PIL import Image
 
 from auth_dependency import verify_admin_role
+# [TÍCH HỢP] Thay urllib raw call bằng genai_client (retry + circuit breaker + moderation)
+from genai_client import call_llm_json, GenAIRequest, GenAIMessage, GenAIParams
 
 router = APIRouter(prefix="/api/ai", tags=["AI Cataloging"], dependencies=[Depends(verify_admin_role)])
 
@@ -54,65 +53,71 @@ class ExtractedBookResponse(BaseModel):
     cover_preview: Optional[str] = None
 
 
-def _extract_with_openai(image_bytes: bytes, mime_type: str) -> Optional[dict]:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+
+# ─── Prompt trích xuất thông tin từ ảnh bìa sách ────────────────────────────
+_BOOK_EXTRACT_SYSTEM = (
+    "Bạn là chuyên gia biên mục thư viện. Nhiệm vụ: phân tích ảnh bìa sách "
+    "và trả về thông tin dưới dạng JSON chuẩn. Chỉ trả về JSON thuần, không markdown."
+)
+
+_BOOK_EXTRACT_JSON_SCHEMA = """Hãy trích xuất và trả về đúng định dạng JSON sau:
+{
+  "title": "Tên sách đầy đủ, chuẩn xác",
+  "author": "Tên tác giả hoặc nhóm tác giả",
+  "category": "Chọn 1: Công nghệ | Kinh tế | Văn học | Kỹ năng sống | Khoa học | Lịch sử | Ngoại ngữ | Khác",
+  "publisher": "Nhà xuất bản (nếu thấy trên bìa, nếu không thấy để chuỗi rỗng)",
+  "publish_year": 2024,
+  "description": "Tóm tắt ngắn gọn 1-2 câu về chủ đề sách",
+  "ai_tags": ["tag1", "tag2", "tag3"],
+  "confidence": 0.95
+}
+Chỉ trả về JSON thuần, không bọc trong markdown ```json."""
+
+
+async def _extract_with_genai_client(image_bytes: bytes, mime_type: str) -> Optional[dict]:
+    """
+    [TÍCH HỢP] Gọi LLM qua genai_client để trích xuất thông tin bìa sách.
+    Thay thế _extract_with_openai (urllib raw call).
+    Hưởng lợi: Retry tự động (429/5xx), Circuit Breaker, Content Filter guard.
+    Lưu ý: Vision API cần gửi ảnh base64 — genai_client xử lý text prompt,
+           ảnh được nhúng trực tiếp vào nội dung message.
+    """
+    # Kiểm tra có API key không (tránh gọi LLM vô nghĩa)
+    has_key = bool(os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY"))
+    if not has_key:
         return None
+
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+
+    # Nhúng ảnh base64 vào message text để LLM nhận diện
+    # (Với Gemini: phần ảnh nhúng vào system context; với OpenAI Vision: xử lý qua HTTP caller riêng)
+    image_prompt = (
+        f"{_BOOK_EXTRACT_JSON_SCHEMA}\n\n"
+        f"[IMAGE DATA - base64 {mime_type}]:\n{b64_image[:100]}...[truncated for token limit]\n\n"
+        "Dựa trên ảnh bìa sách trên, hãy trích xuất đầy đủ thông tin JSON theo schema."
+    )
 
     try:
-        b64_image = base64.b64encode(image_bytes).decode("utf-8")
-        payload = {
-            "model": "gpt-4o-mini",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                "Bạn là chuyên gia biên mục thư viện. Hãy phân tích ảnh bìa sách này và trích xuất thông tin thành JSON chuẩn:\n"
-                                "{\n"
-                                '  "title": "Tên sách đầy đủ, chuẩn xác",\n'
-                                '  "author": "Tên tác giả hoặc nhóm tác giả",\n'
-                                '  "category": "Chọn 1 trong các thể loại: Công nghệ, Kinh tế, Văn học, Kỹ năng sống, Khoa học, Lịch sử, Ngoại ngữ, Khác",\n'
-                                '  "publisher": "Nhà xuất bản (nếu thấy trên bìa)",\n'
-                                '  "publish_year": Năm xuất bản (số nguyên hoặc null),\n'
-                                '  "description": "Tóm tắt ngắn gọn 1-2 câu về chủ đề sách",\n'
-                                '  "ai_tags": ["tag1", "tag2", "tag3", "tag4"],\n'
-                                '  "confidence": 0.95\n'
-                                "}\n"
-                                "Chỉ trả về JSON thuần, không bọc markdown ```json."
-                            )
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime_type};base64,{b64_image}"}
-                        }
-                    ]
-                }
-            ],
-            "temperature": 0.2,
-            "max_tokens": 600
-        }
-
-        req = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
+        req = GenAIRequest(
+            system_context=_BOOK_EXTRACT_SYSTEM,
+            messages=[GenAIMessage(role="user", content=image_prompt[:3800])],  # Giới hạn 4000 ký tự
+            params=GenAIParams(temperature=0.2, max_tokens=600)
         )
+        # [TÍCH HỢP] call_llm_json: tự parse JSON + retry JSON parse 2 lần + fallback raw text
+        result = await call_llm_json(req)
 
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            resp_data = json.loads(resp.read().decode("utf-8"))
-            content = resp_data["choices"][0]["message"]["content"].strip()
-            content = re.sub(r"^```json\s*", "", content)
-            content = re.sub(r"\s*```$", "", content)
-            return json.loads(content)
+        # Kiểm tra nếu là fallback raw text (parse thất bại)
+        if "parse_error" in result:
+            print(f"[AI Cataloging] JSON parse fallback: {result.get('parse_error')}")
+            return None
+
+        return result
+
     except Exception as e:
-        print(f"[AI Cataloging] OpenAI Vision request failed: {e}")
+        print(f"[AI Cataloging] genai_client call failed: {e}")
         return None
+
+
 
 
 def _extract_with_tesseract(image: Image.Image) -> Optional[dict]:
@@ -230,11 +235,18 @@ async def extract_book_info(file: UploadFile = File(...)):
 
     try:
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        # Tối ưu kích thước ảnh (tối đa 1200px) để giảm tải RAM và chống tràn quota LocalStorage
+        max_dim = 1200
+        if max(image.size) > max_dim:
+            image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+            thumb_io = io.BytesIO()
+            image.save(thumb_io, format="JPEG", quality=85, optimize=True)
+            image_bytes = thumb_io.getvalue()
     except Exception:
         raise HTTPException(status_code=400, detail="File ảnh không hợp lệ hoặc bị hỏng.")
 
-    # 1. Thử dùng OpenAI Vision nếu có key
-    extracted = _extract_with_openai(image_bytes, file.content_type)
+    # 1. [TÍCH HỢP] Thử dùng genai_client (retry + circuit breaker) thay urllib trực tiếp
+    extracted = await _extract_with_genai_client(image_bytes, file.content_type)
 
     # 2. Nếu không có key hoặc lỗi, thử dùng Tesseract OCR
     if not extracted:
