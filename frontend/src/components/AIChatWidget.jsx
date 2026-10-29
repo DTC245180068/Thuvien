@@ -396,47 +396,53 @@ export default function AIChatWidget({ books = [] }) {
                           <div style={{ fontSize: '11px', fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                             ✨ Sách đề xuất phù hợp ({msg.suggested_books.length}):
                           </div>
-                          {msg.suggested_books.map((b, idx) => (
-                            <div
-                              key={idx}
-                              onClick={() => {
-                                if (b.book_id) {
-                                  window.dispatchEvent(new CustomEvent('smartlib:open-book-detail', { detail: { bookId: b.book_id } }));
-                                }
-                              }}
-                              style={{
-                                background: '#f8fafc',
-                                borderRadius: '8px',
-                                border: '1px solid #e2e8f0',
-                                padding: '8px 10px',
-                                transition: 'all 0.15s ease',
-                                cursor: b.book_id ? 'pointer' : 'default'
-                              }}
-                              onMouseEnter={(e) => {
-                                if (b.book_id) {
-                                  e.currentTarget.style.borderColor = '#93c5fd';
-                                  e.currentTarget.style.background = '#eff6ff';
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                if (b.book_id) {
-                                  e.currentTarget.style.borderColor = '#e2e8f0';
-                                  e.currentTarget.style.background = '#f8fafc';
-                                }
-                              }}
-                              title={b.book_id ? 'Bấm để xem chi tiết cuốn sách này' : ''}
-                            >
-                              <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>📖 {b.title}</span>
-                                {b.book_id && <span style={{ fontSize: '10.5px', color: '#2563eb', fontWeight: 600 }}>Xem sách →</span>}
-                              </div>
-                              {b.reason && (
-                                <div style={{ fontSize: '11.5px', color: '#4338ca', marginTop: '3px', background: '#eef2ff', padding: '3px 6px', borderRadius: '5px' }}>
-                                  💡 {b.reason}
+                          {msg.suggested_books.map((b, idx) => {
+                            const bId = b.book_id || b.id;
+                            const isClickable = Boolean(bId || b.title);
+                            return (
+                              <div
+                                key={idx}
+                                onClick={() => {
+                                  if (isClickable) {
+                                    window.dispatchEvent(new CustomEvent('smartlib:open-book-detail', { 
+                                      detail: { bookId: bId, title: b.title } 
+                                    }));
+                                  }
+                                }}
+                                style={{
+                                  background: '#f8fafc',
+                                  borderRadius: '8px',
+                                  border: '1px solid #e2e8f0',
+                                  padding: '8px 10px',
+                                  transition: 'all 0.15s ease',
+                                  cursor: isClickable ? 'pointer' : 'default'
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (isClickable) {
+                                    e.currentTarget.style.borderColor = '#93c5fd';
+                                    e.currentTarget.style.background = '#eff6ff';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (isClickable) {
+                                    e.currentTarget.style.borderColor = '#e2e8f0';
+                                    e.currentTarget.style.background = '#f8fafc';
+                                  }
+                                }}
+                                title={isClickable ? 'Bấm để xem chi tiết cuốn sách này' : ''}
+                              >
+                                <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span>📖 {b.title}</span>
+                                  {isClickable && <span style={{ fontSize: '10.5px', color: '#2563eb', fontWeight: 600 }}>Xem sách →</span>}
                                 </div>
-                              )}
-                            </div>
-                          ))}
+                                {b.reason && (
+                                  <div style={{ fontSize: '11.5px', color: '#4338ca', marginTop: '3px', background: '#eef2ff', padding: '3px 6px', borderRadius: '5px' }}>
+                                    💡 {b.reason}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>

@@ -442,6 +442,20 @@ export default function ReaderPortal({ activeTab, onTabChange }) {
     setCurrentPage(1);
   }, [bookSearch, selectedCategory]);
 
+  // [BUG-FE-05 FIX] Lắng nghe sự kiện click mở chi tiết sách từ AI Chatbot
+  useEffect(() => {
+    const handleOpenBookDetailEvent = (e) => {
+      if (e && e.detail) {
+        const { bookId, title } = e.detail;
+        handleOpenBookByTitleOrId(title, bookId);
+      }
+    };
+    window.addEventListener('smartlib:open-book-detail', handleOpenBookDetailEvent);
+    return () => {
+      window.removeEventListener('smartlib:open-book-detail', handleOpenBookDetailEvent);
+    };
+  }, [books, myReservations]);
+
   const handleOpenBookByTitleOrId = (bookTitle, bookId) => {
     // 1. Kiểm tra trong danh mục sách thư viện (database) trước tiên để lấy dữ liệu mới nhất
     const found = (books || []).find(b =>
