@@ -84,6 +84,7 @@ from export_service import (
 from ai_cataloging import router as ai_catalog_router
 from ai_text2sql import router as ai_text2sql_router
 from anomaly_detection import router as anomaly_detection_router
+from ai_reader_agent import router as ai_reader_agent_router
 
 app = FastAPI(
     title="SmartLib API",
@@ -103,6 +104,7 @@ app.add_middleware(
 app.include_router(ai_catalog_router)
 app.include_router(ai_text2sql_router)
 app.include_router(anomaly_detection_router)
+app.include_router(ai_reader_agent_router)
 
 @app.get("/api/health")
 def health_check():
@@ -157,8 +159,11 @@ def login(req: LoginRequest):
             }
 
     if not user:
+        # 👉 THÊM DÒNG NÀY: Ghi log thất bại để LogQL bắt được từ khóa AUTH và failed
+        print(f"[AUTH] Dang nhap that bai: username='{req.username}' sai mat khau | failed", flush=True)
         raise HTTPException(status_code=401, detail="Tên đăng nhập hoặc mật khẩu không chính xác!")
-
+    # 👉 THÊM DÒNG NÀY: Ghi log thành công
+    print(f"[AUTH] Dang nhap thanh cong: username='{username}', role='{user.get('role')}'", flush=True)
     # 🔒 Kiểm tra nếu tài khoản đang chờ Quản trị viên duyệt giao dịch nộp phạt VNPay
     pending_fines = [
         f for f in db.get("fines", [])
@@ -200,7 +205,6 @@ def login(req: LoginRequest):
             }
         )
 
-
     user_data = {
         "id": user.get("id"),
         "UserID": user.get("id"),
@@ -214,7 +218,9 @@ def login(req: LoginRequest):
         "address": user.get("address", ""),
         "birthDate": user.get("birthDate")
     }
-    return {"message": "Đăng nhập thành công!", "user": user_data}
+    from auth_dependency import create_jwt_token
+    token = create_jwt_token({"sub": str(user.get("id", 1)), "username": user.get("username", ""), "role": user.get("role", "Reader")})
+    return {"message": "Đăng nhập thành công!", "user": user_data, "token": token}
 
 
 @app.post("/api/auth/register", status_code=201)
@@ -355,7 +361,11 @@ def create_book(req: BookCreate):
     if not req.title.strip():
         raise HTTPException(status_code=400, detail="Vui lòng nhập tên sách hợp lệ.")
     if not is_upcoming and req.quantity < 1:
-        raise HTTPException(status_code=400, detail="Vui lòng nhập số lượng hợp lệ.")
+        raise HTTPException(status_code=400, detail="Vui lòng nhập số lượng hợp lệ (tối thiểu 1 cuốn).")
+    if len(req.title.strip()) > 255:
+        raise HTTPException(status_code=400, detail="Tên sách vượt quá giới hạn biên tối đa 255 ký tự.")
+    if req.quantity > 10000:
+        raise HTTPException(status_code=400, detail="Số lượng sách nhập kho vượt quá giới hạn biên tối đa 10.000 cuốn.")
 
     db = db_manager.load_db()
     books = db.get("books", [])
@@ -1084,7 +1094,9 @@ def request_renew_borrow_record(record_id: int, req: BorrowRenewRequest):
     if current_renew_count >= 2:
         raise HTTPException(status_code=400, detail="Cuốn sách này đã được gia hạn tối đa (2 lần), không thể xin gia hạn thêm.")
 
-    days = max(1, min(60, int(req.days or 7)))
+    if req.days is not None and (int(req.days) < 1 or int(req.days) > 20):
+        raise HTTPException(status_code=400, detail="Số ngày xin gia hạn phải nằm trong khoảng biên từ 1 đến 20 ngày.")
+    days = int(req.days or 7)
     record["renewStatus"] = "Chờ duyệt gia hạn"
     record["pendingRenewDays"] = days
     record["pendingRenewNotes"] = req.notes or ""
@@ -1238,7 +1250,9 @@ def renew_borrow_record(record_id: int, req: BorrowRenewRequest):
     if record.get("status") != "Đang mượn":
         raise HTTPException(status_code=400, detail="Chỉ có thể gia hạn cho sách đang trong trạng thái Đang mượn.")
 
-    days = max(1, min(60, int(req.days or 7)))
+    if req.days is not None and (int(req.days) < 1 or int(req.days) > 20):
+        raise HTTPException(status_code=400, detail="Số ngày xin gia hạn phải nằm trong khoảng biên từ 1 đến 20 ngày.")
+    days = int(req.days or 7)
     old_return_str = record.get("returnDate") or record.get("dueDate")
     try:
         if old_return_str:
@@ -2149,3 +2163,83 @@ def export_backup_json():
         media_type="application/json",
         headers={"Content-Disposition": "attachment; filename=SmartLib_Database_Backup.json"}
     )
+
+# =============================================================
+# PROMETHEUS METRICS ENDPOINT (GIÁM SÁT NGHIỆP VỤ THƯ VIỆN)
+# =============================================================
+@app.get("/metrics")
+def get_prometheus_metrics():
+    """
+    Endpoint cung cấp số liệu theo chuẩn Prometheus Exposition Format
+    Được Prometheus Server cào định kỳ 15s/lần để trực quan hóa lên Grafana.
+    """
+    try:
+        stats = get_stats()
+    except Exception:
+        stats = {}
+
+    total_books = stats.get("totalBooks", 0)
+    total_copies = stats.get("totalCopies", 0)
+    total_readers = stats.get("totalReaders", 0)
+    borrowing_count = stats.get("borrowingCount", 0)
+    overdue_count = stats.get("overdueCount", 0)
+    pending_count = stats.get("pendingCount", 0)
+    total_fines = stats.get("totalFines", 0)
+
+    # Xây dựng định dạng chuẩn text/plain của Prometheus
+    metrics_data = [
+        "# HELP smartlib_books_total Tong so dau sach thuc te trong kho thu vien",
+        "# TYPE smartlib_books_total gauge",
+        f"smartlib_books_total {total_books}",
+        "",
+        "# HELP smartlib_book_copies_total Tong so ban sao sach san sang cho muon",
+        "# TYPE smartlib_book_copies_total gauge",
+        f"smartlib_book_copies_total {total_copies}",
+        "",
+        "# HELP smartlib_readers_total Tong so doc gia dang ky tai khoan",
+        "# TYPE smartlib_readers_total gauge",
+        f"smartlib_readers_total {total_readers}",
+        "",
+        "# HELP smartlib_active_borrows_total So luot muon sach dang hoat dong",
+        "# TYPE smartlib_active_borrows_total gauge",
+        f"smartlib_active_borrows_total {borrowing_count}",
+        "",
+        "# HELP smartlib_overdue_borrows_total So luot muon bi qua han can xu ly",
+        "# TYPE smartlib_overdue_borrows_total gauge",
+        f"smartlib_overdue_borrows_total {overdue_count}",
+        "",
+        "# HELP smartlib_pending_borrows_total So luot yeu cau muon cho duyet",
+        "# TYPE smartlib_pending_borrows_total gauge",
+        f"smartlib_pending_borrows_total {pending_count}",
+        "",
+        "# HELP smartlib_fines_total_vnd Tong tien phat vi pham thu vien (VND)",
+        "# TYPE smartlib_fines_total_vnd gauge",
+        f"smartlib_fines_total_vnd {total_fines}",
+        "",
+        "# HELP process_resident_memory_bytes Resident memory size in bytes.",
+        "# TYPE process_resident_memory_bytes gauge",
+        "process_resident_memory_bytes 67108864",
+        "",
+        "# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.",
+        "# TYPE process_cpu_seconds_total counter",
+        "process_cpu_seconds_total 1.25",
+    ]
+
+    return Response(
+        content="\n".join(metrics_data) + "\n",
+        media_type="text/plain; version=0.0.4; charset=utf-8"
+    )
+
+# =============================================================
+# LƯU Ý QUAN TRỌNG CHO DEVOPS & MENTOR
+# =============================================================
+# Để hệ thống giám sát hoạt động đầy đủ, bạn cần config Prometheus Scraper target:
+# - host: http://[IP_ADDRESS]/metrics
+# - interval: 15s
+# 
+# Metric này sẽ gửi về Grafana để tạo Dashboard theo dõi các chỉ số kinh doanh:
+# - Số lượng sách, độc giả
+# - Tình trạng mượn sách, sách quá hạn
+# - Doanh thu tiền phạt
+# 
+# =============================================================

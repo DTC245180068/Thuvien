@@ -1,0 +1,38 @@
+# =============================================================
+# CẤU HÌNH PROMETHEUS SERVER - DỰ ÁN SMARTLIB (ICTU)
+# Sinh viên: Nguyễn Trung Học - MSSV: DTC245180174
+# =============================================================
+
+global:
+  scrape_interval: 15s      # Định kỳ cào số liệu 15 giây/lần
+  evaluation_interval: 15s  # Đánh giá cảnh báo 15 giây/lần
+
+rule_files:
+  - "/etc/prometheus/alert.rules.yml"
+
+scrape_configs:
+  # 1. Tự giám sát máy chủ Prometheus
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # 2. Giám sát phần cứng các Docker container qua cAdvisor
+  - job_name: 'docker_containers'
+    static_configs:
+      - targets: ['smartlib_cadvisor:8080']
+
+  # 3. Giám sát CSDL MySQL qua mysqld-exporter
+  - job_name: 'mysql_db'
+    static_configs:
+      - targets: ['smartlib_mysqld_exporter:9104']
+
+  # 4. Giám sát Ứng dụng Web & Nghiệp vụ Thư viện SmartLib
+  - job_name: 'smartlib_app'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['smartlib_backend:8000']
+
+  # 5. Giám sát máy chủ Web Nginx qua Nginx Prometheus Exporter
+  - job_name: 'nginx_server'
+    static_configs:
+      - targets: ['smartlib_nginx_exporter:9113']

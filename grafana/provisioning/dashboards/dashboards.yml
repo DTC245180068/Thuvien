@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: 'SmartLib Dashboards'
+    orgId: 1
+    folder: 'SmartLib DevSecOps'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 15
+    options:
+      path: /var/lib/grafana/dashboards

@@ -45,6 +45,49 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
+  // 🚀 Tự động nhận diện mã QR quét sách từ Camera: /?bookId=...
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const qBookId = params.get('bookId');
+    if (qBookId) {
+      sessionStorage.setItem('pending_qr_book_id', qBookId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAuthenticated && books && books.length > 0) {
+      const pendingId = sessionStorage.getItem('pending_qr_book_id');
+      const params = new URLSearchParams(window.location.search);
+      const targetId = params.get('bookId') || pendingId;
+      if (targetId) {
+        const found = books.find(b => Number(b.id) === Number(targetId));
+        if (found) {
+          setSelectedBook(found);
+          setDetailModalOpen(true);
+          try {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('bookId');
+            window.history.replaceState({}, '', url.pathname);
+          } catch (e) {}
+        }
+      }
+    }
+
+    const handleCustomOpenBook = (e) => {
+      const bId = e.detail?.bookId;
+      if (bId && books && books.length > 0) {
+        const found = books.find(b => Number(b.id) === Number(bId));
+        if (found) {
+          setSelectedBook(found);
+          setDetailModalOpen(true);
+        }
+      }
+    };
+    window.addEventListener('smartlib:open-book-detail', handleCustomOpenBook);
+    return () => window.removeEventListener('smartlib:open-book-detail', handleCustomOpenBook);
+  }, [isAuthenticated, books]);
+
   // Keyboard shortcut '/' to trigger search
   useEffect(() => {
     const handleKeyDown = (e) => {

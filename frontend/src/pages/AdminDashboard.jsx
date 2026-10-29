@@ -12,6 +12,7 @@ import ExportReportModal from '../components/ExportReportModal';
 import BookAIUpload from '../components/BookAIUpload';
 import AdminChatbot from '../components/AdminChatbot';
 import AlertQueue from '../components/AlertQueue';
+import ReceiptQRScannerModal from '../components/ReceiptQRScannerModal';
 import { UPCOMING_BOOKS } from '../components/UpcomingBooksSection';
 import {
   BookOpen, Users, Clock, AlertTriangle, CheckCircle, Search, Plus,
@@ -663,6 +664,7 @@ export default function AdminDashboard({ activeTab, onTabChange, isLibrarian = f
   const [aiUploadOpen, setAiUploadOpen] = useState(false);
   const [chatbotOpen, setChatbotOpen] = useState(false);
   const [alertQueueOpen, setAlertQueueOpen] = useState(false);
+  const [receiptScannerOpen, setReceiptScannerOpen] = useState(false);
   const [editingBook, setEditingBook] = useState(null);
   const [readerModalOpen, setReaderModalOpen] = useState(false);
   const [editingReader, setEditingReader] = useState(null);
@@ -1351,6 +1353,25 @@ export default function AdminDashboard({ activeTab, onTabChange, isLibrarian = f
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
               <button
                 type="button"
+                onClick={() => setReceiptScannerOpen(true)}
+                className="btn btn-outline"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  background: 'linear-gradient(135deg, #eff6ff, #f0fdf4)',
+                  borderColor: '#93c5fd',
+                  color: '#1d4ed8',
+                  fontWeight: 700,
+                  boxShadow: '0 2px 8px rgba(29, 78, 216, 0.08)'
+                }}
+                title="Quét mã QR trên phiếu mượn PDF để duyệt hoặc nhận trả sách"
+              >
+                <QrCode size={16} color="#2563eb" />
+                <span>Quét mã QR Phiếu</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setAlertQueueOpen(true)}
                 className="btn btn-outline"
                 style={{
@@ -1782,7 +1803,30 @@ export default function AdminDashboard({ activeTab, onTabChange, isLibrarian = f
                       </button>
                     )}
                   </div>
-                  <div style={{ display: 'flex', gap: '10px' }}>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => setReceiptScannerOpen(true)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '0 14px',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        height: '34px',
+                        boxShadow: '0 2px 8px rgba(79, 70, 229, 0.25)',
+                        whiteSpace: 'nowrap'
+                      }}
+                      title="Quét mã QR trên phiếu mượn PDF để duyệt hoặc nhận trả sách"
+                    >
+                      <QrCode size={15} /> Quét mã QR phiếu
+                    </button>
                     <div style={{ position: 'relative', width: '250px' }}>
                       <input
                         type="text"
@@ -6196,6 +6240,22 @@ export default function AdminDashboard({ activeTab, onTabChange, isLibrarian = f
         />,
         document.body
       )}
+
+      {/* Modal Quét mã QR Phiếu Mượn PDF cho Thủ thư */}
+      <ReceiptQRScannerModal
+        isOpen={receiptScannerOpen}
+        onClose={() => setReceiptScannerOpen(false)}
+        borrowRecords={borrowRecords}
+        onApproveBorrow={async (record) => {
+          await api.approveBorrow(record.id);
+          await loadData(true);
+        }}
+        onReturnBook={async (record) => {
+          await api.updateBorrowStatus(record.id, 'Đã trả');
+          await loadData(true);
+        }}
+        showToast={showToast}
+      />
 
       {/* Toast Notification khi Thêm/Sửa/Xóa thành công */}
       {toastMessage && (
