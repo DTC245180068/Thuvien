@@ -1,8 +1,8 @@
 # 🤖 SMARTLIB — NHẬT KÝ PROMPT, THỰC NGHIỆM AI & TƯ DUY PHẢN BIỆN
 **Minh chứng Toàn diện Quá trình Thiết kế Prompt (v1 $\rightarrow$ v3), Ứng dụng AI trong SDLC, Phản biện Sửa lỗi AI & Cẩm nang Vấn đáp Độc lập**
-> **Học phần:** Ứng dụng trí tuệ nhân tạo | **Lớp:** K23.K1.KTPM K23A, B (HK1 2026–2027)  
+> **Học phần:** Ứng dụng trí tuệ nhân tạo | **Lớp:** KTPM K23B (HK1 2026–2027)  
 > **Giảng viên giảng dạy:** Nguyễn Thị Tuyển | **Khoa:** Công nghệ thông tin - ĐH CNTT&TT Thái Nguyên (ICTU)  
-> **Sinh viên thực hiện:** Nguyễn Trung Học — **MSSV:** DTC245180174  
+> **Nhóm sinh viên thực hiện (KTPM K23B):** Vũ Hồng Dũng (Nhóm Trưởng - DTC245180068), Nguyễn Trung Học (DTC245180174), Lê Quang Hưng (DTC245180036)  
 > **Chuẩn đầu ra đáp ứng:** `CLO1`, `CLO2`, `CLO3`, `CLO4`, `CLO5` (Tiêu chí `2.4`, `3.2`, `3.3`, `3.4`, `5.1`, `5.2`, `5.3`, `5.4`)  
 > 📖 **Bộ tài liệu kỹ thuật SmartLib:** [📋 Yêu cầu (SRS)](requirements.md) | [📊 Ca sử dụng & Kiểm thử](use_cases.md) | [🗄️ Thiết kế CSDL (ERD 7 Bảng)](database_design.md) | [🤖 Nhật ký Prompt & AI Log](ai_log.md) | [🏠 Trang chủ README](../README.md)
 

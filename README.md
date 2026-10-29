@@ -18,9 +18,9 @@
 | :--- | :--- |
 | **Trường / Khoa** | Trường Đại học Công nghệ Thông tin và Truyền thông Thái Nguyên (ICTU) — Khoa Công nghệ thông tin |
 | **Tên học phần** | **Ứng dụng trí tuệ nhân tạo** |
-| **Lớp / Học kỳ** | K23.K1.KTPM K23A, B — Học kỳ 1, Năm học 2026–2027 |
+| **Lớp / Học kỳ** | **KTPM K23B** (K23.K1.KTPM K23B) — Học kỳ 1, Năm học 2026–2027 |
 | **Giảng viên giảng dạy** | **Nguyễn Thị Tuyển** |
-| **Sinh viên thực hiện** | **Nguyễn Trung Học** — **MSSV:** `DTC245180174` |
+| **Nhóm sinh viên thực hiện** | 1. **Vũ Hồng Dũng** — **MSSV:** DTC245180068 *(Nhóm Trưởng)*<br>2. **Nguyễn Trung Học** — **MSSV:** DTC245180174<br>3. **Lê Quang Hưng** — **MSSV:** DTC245180036 |
 | **Chuẩn đầu ra đáp ứng** | `CLO1`, `CLO2`, `CLO3`, `CLO4`, `CLO5` & `PLO7` (`PI 7.1`, `PI 7.2`, `PI 7.3`) |
 
 ---
@@ -168,4 +168,4 @@ python backend/test_evaluation.py
 
 ---
 
-*Dự án SmartLib — Hoàn thiện bởi sinh viên Nguyễn Trung Học (DTC245180174) dưới sự hướng dẫn của Giảng viên Nguyễn Thị Tuyển — Khoa CNTT, Trường ĐH CNTT&TT Thái Nguyên (ICTU).*
+*Dự án SmartLib — Hoàn thiện bởi Nhóm sinh viên KTPM K23B: Vũ Hồng Dũng (Nhóm trưởng - DTC245180068), Nguyễn Trung Học (DTC245180174), Lê Quang Hưng (DTC245180036) dưới sự hướng dẫn của Giảng viên Nguyễn Thị Tuyển — Khoa CNTT, Trường ĐH CNTT&TT Thái Nguyên (ICTU).*

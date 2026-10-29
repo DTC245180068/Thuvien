@@ -1,8 +1,8 @@
 # 📊 SMARTLIB — ĐẶC TẢ CA SỬ DỤNG & BỘ KIỂM THỬ ĐÚNG - SAI - BIÊN
 **Hệ thống Quản lý Thư viện Thông minh Tích hợp AI — SmartLib v3.0**
-> **Học phần:** Ứng dụng trí tuệ nhân tạo | **Lớp:** K23.K1.KTPM K23A, B (HK1 2026–2027)  
+> **Học phần:** Ứng dụng trí tuệ nhân tạo | **Lớp:** KTPM K23B (HK1 2026–2027)  
 > **Giảng viên giảng dạy:** Nguyễn Thị Tuyển | **Khoa:** Công nghệ thông tin - ĐH CNTT&TT Thái Nguyên (ICTU)  
-> **Sinh viên thực hiện:** Nguyễn Trung Học — **MSSV:** DTC245180174  
+> **Nhóm sinh viên thực hiện (KTPM K23B):** Vũ Hồng Dũng (Nhóm Trưởng - DTC245180068), Nguyễn Trung Học (DTC245180174), Lê Quang Hưng (DTC245180036)  
 > **Chuẩn đầu ra đáp ứng:** `CLO1`, `CLO2`, `CLO3`, `CLO4` (Tiêu chí `1.2`, `2.1`, `2.2`, `2.3`, `3.1`, `3.3`)  
 > 📖 **Bộ tài liệu kỹ thuật SmartLib:** [📋 Yêu cầu (SRS)](requirements.md) | [📊 Ca sử dụng & Kiểm thử](use_cases.md) | [🗄️ Thiết kế CSDL (ERD 7 Bảng)](database_design.md) | [🤖 Nhật ký Prompt & AI Log](ai_log.md) | [🏠 Trang chủ README](../README.md)
 

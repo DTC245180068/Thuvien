@@ -1,6 +1,10 @@
 # 📋 BẢNG KIỂM THỬ LỖI & KẾ HOẠCH FIX TOÀN DIỆN CHO FRONTEND VÀ BACKEND
 **Dự án:** SmartLib — Hệ thống Quản trị Thư viện Số Ứng dụng AI  
-**Học phần:** Ứng dụng trí tuệ nhân tạo — ICTU  
+**Học phần:** Ứng dụng trí tuệ nhân tạo — ICTU | **Lớp:** KTPM K23B  
+**Nhóm sinh viên thực hiện:**  
+1. **Vũ Hồng Dũng** — **MSSV:** DTC245180068 (Nhóm Trưởng)  
+2. **Nguyễn Trung Học** — **MSSV:** DTC245180174  
+3. **Lê Quang Hưng** — **MSSV:** DTC245180036  
 **Đối tượng sử dụng:** Đội ngũ phát triển nhóm (Frontend Dev, Backend Dev, DevOps, QA Tester)  
 **Tài liệu đối chiếu:** `README.md` & `docs/use_cases.md`
 
