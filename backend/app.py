@@ -272,6 +272,17 @@ def register(req: RegisterRequest):
     return {"message": "Đăng ký thành công!", "user": user_data}
 
 
+@app.get("/api/auth/profile/{user_id}")
+def get_profile(user_id: int):
+    db = db_manager.load_db()
+    users = db.get("users", [])
+    user = next((u for u in users if int(u.get("id", 0)) == user_id), None)
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
+    safe_user = {k: v for k, v in user.items() if k not in ("password", "password_hash", "passwordHash")}
+    return safe_user
+
+
 @app.put("/api/auth/profile/{user_id}")
 def update_profile(user_id: int, req: UpdateProfileRequest):
     db = db_manager.load_db()
@@ -281,7 +292,9 @@ def update_profile(user_id: int, req: UpdateProfileRequest):
         raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
 
     if req.fullName is not None:
-        user["fullName"] = req.fullName.strip()
+        name_val = req.fullName.strip()
+        user["fullName"] = name_val
+        user["FullName"] = name_val
     if req.email is not None:
         user["email"] = req.email.strip()
     if req.phone is not None:
@@ -292,7 +305,8 @@ def update_profile(user_id: int, req: UpdateProfileRequest):
         user["birthDate"] = req.birthDate
 
     db_manager.save_db(db)
-    return {"message": "Cập nhật thông tin thành công!", "user": user}
+    safe_user = {k: v for k, v in user.items() if k not in ("password", "password_hash", "passwordHash")}
+    return {"message": "Cập nhật thông tin thành công!", "user": safe_user}
 
 
 @app.post("/api/auth/change-password/{user_id}")

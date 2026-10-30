@@ -60,7 +60,11 @@ const normalizeUser = (loaded, loadedRole) => {
       role: 'Admin',
       Role: 'Admin'
     };
-    if (adminUser.fullName === 'Trần Thị Mai' || adminUser.fullName === 'Độc giả') {
+    const currentName = loaded?.fullName || loaded?.FullName;
+    if (currentName && currentName !== 'Trần Thị Mai' && currentName !== 'Độc giả') {
+      adminUser.fullName = currentName;
+      adminUser.FullName = currentName;
+    } else if (!adminUser.fullName || adminUser.fullName === 'Trần Thị Mai' || adminUser.fullName === 'Độc giả') {
       adminUser.fullName = 'Quản trị viên';
       adminUser.FullName = 'Quản trị viên';
     }
@@ -205,6 +209,8 @@ export const AuthProvider = ({ children }) => {
 
   const updateUser = (updatedData) => {
     const merged = { ...user, ...updatedData };
+    if (updatedData.fullName) merged.FullName = updatedData.fullName;
+    if (updatedData.FullName) merged.fullName = updatedData.FullName;
     const actualRole = merged.role || merged.Role || role || 'Reader';
     const normalized = normalizeUser(merged, actualRole);
     setUser(normalized);
@@ -214,6 +220,19 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('currentUser', JSON.stringify(normalized));
     localStorage.setItem('currentUserRole', actualRole);
   };
+
+  // Đồng bộ thông tin hồ sơ mới nhất từ máy chủ khi mở ứng dụng
+  useEffect(() => {
+    if (user && user.id && typeof window !== 'undefined' && !window.location.hostname.includes('github.io')) {
+      if (api.getProfile) {
+        api.getProfile(user.id).then(fresh => {
+          if (fresh && fresh.fullName && fresh.fullName !== user.fullName) {
+            updateUser(fresh);
+          }
+        }).catch(() => {});
+      }
+    }
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, role, login, register, logout, updateUser, isAuthenticated: !!user }}>

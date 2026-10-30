@@ -921,7 +921,7 @@ class MySQLDatabaseManager:
                     continue
                 existing_u = session.query(UserModel).filter_by(id=uid).first()
                 if existing_u:
-                    existing_u.full_name = u.get("fullName", existing_u.full_name)
+                    existing_u.full_name = u.get("fullName") or u.get("FullName") or existing_u.full_name
                     existing_u.email = u.get("email", existing_u.email)
                     existing_u.phone = u.get("phone", existing_u.phone)
                     existing_u.address = u.get("address", existing_u.address)
@@ -1545,7 +1545,7 @@ class MySQLDatabaseManager:
                     continue
                 existing_user = session.query(UserModel).filter_by(id=uid).first()
                 if existing_user:
-                    existing_user.full_name = u.get("fullName", existing_user.full_name)
+                    existing_user.full_name = u.get("fullName") or u.get("FullName") or existing_user.full_name
                     existing_user.email = u.get("email", existing_user.email)
                     existing_user.phone = u.get("phone", existing_user.phone)
                     existing_user.address = u.get("address", existing_user.address)

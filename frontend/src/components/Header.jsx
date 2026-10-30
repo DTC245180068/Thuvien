@@ -13,12 +13,12 @@ export default function Header({ activeTab, onTabChange, onOpenExport }) {
 
   const isAdmin = role === 'Admin';
   const displayName = isAdmin 
-    ? 'Quản trị viên' 
+    ? (user?.fullName || user?.FullName || 'Quản trị viên') 
     : (user?.fullName && user.fullName !== 'Độc giả' 
         ? user.fullName 
         : (user?.username === 'reader' ? 'Trần Thị Mai' : (user?.fullName || user?.username || 'Trần Thị Mai')));
 
-  const initial = displayName ? displayName.charAt(0).toUpperCase() : (isAdmin ? 'A' : 'T');
+  const initial = displayName ? displayName.trim().charAt(0).toUpperCase() : (isAdmin ? 'Q' : 'T');
 
   useEffect(() => {
     function handleClickOutside(e) {
