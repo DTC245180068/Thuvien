@@ -11,8 +11,8 @@ export default function ProfilePage({ onBack }) {
   const getInitialProfile = () => {
     if (isAdmin) {
       return {
-        fullName: (user?.username === 'admin' && user?.fullName && user?.fullName !== 'Trần Thị Mai' && user?.fullName !== 'Độc giả') 
-          ? user.fullName 
+        fullName: (user?.fullName && user?.fullName !== 'Trần Thị Mai' && user?.fullName !== 'Độc giả') 
+          ? (user.fullName || user.FullName) 
           : DEFAULT_ADMIN.fullName,
         email: (user?.username === 'admin' && user?.email && !user?.email.includes('mai.tran')) 
           ? user.email 
@@ -52,6 +52,26 @@ export default function ProfilePage({ onBack }) {
     setProfileData(getInitialProfile());
   }, [user, role]);
 
+  useEffect(() => {
+    let isMounted = true;
+    const targetId = isAdmin ? 1 : (isLibrarian ? 3 : (user?.id || 2));
+    if (api.getProfile) {
+      api.getProfile(targetId).then(fresh => {
+        if (isMounted && fresh) {
+          setProfileData(prev => ({
+            ...prev,
+            fullName: fresh.fullName || fresh.FullName || prev.fullName,
+            email: fresh.email || prev.email,
+            phone: fresh.phone || prev.phone,
+            address: fresh.address || prev.address,
+            birthDate: fresh.birthDate || prev.birthDate
+          }));
+        }
+      }).catch(() => {});
+    }
+    return () => { isMounted = false; };
+  }, [user?.id, isAdmin, isLibrarian]);
+
   const [profileMsg, setProfileMsg] = useState('');
   const [profileErr, setProfileErr] = useState('');
   const [loadingProfile, setLoadingProfile] = useState(false);
@@ -68,14 +88,19 @@ export default function ProfilePage({ onBack }) {
     setProfileErr('');
     try {
       const targetId = isAdmin ? 1 : (isLibrarian ? 3 : (user?.id || 2));
+      const trimmedName = profileData.fullName.trim();
       const payload = {
         ...profileData,
+        fullName: trimmedName,
+        FullName: trimmedName,
         id: targetId,
         username: isAdmin ? 'admin' : (isLibrarian ? 'librarian' : (user?.username || 'reader')),
-        role: isAdmin ? 'Admin' : (isLibrarian ? 'Librarian' : 'Reader')
+        role: isAdmin ? 'Admin' : (isLibrarian ? 'Librarian' : 'Reader'),
+        Role: isAdmin ? 'Admin' : (isLibrarian ? 'Librarian' : 'Reader')
       };
-      await api.updateProfile(targetId, payload);
-      updateUser(payload);
+      const res = await api.updateProfile(targetId, payload);
+      const updatedUser = res?.user ? { ...res.user, ...payload } : payload;
+      updateUser(updatedUser);
       setProfileMsg('✓ Cập nhật thông tin cá nhân thành công!');
     } catch (err) {
       setProfileErr(err.message || 'Lỗi khi cập nhật thông tin');

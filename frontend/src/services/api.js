@@ -495,22 +495,40 @@ export const api = {
     return { user: newUser, message: 'Đăng ký thành công!' };
   },
 
+  getProfile: async (userId) => {
+    if (!isStaticHost) {
+      try {
+        const res = await fetchWithTimeout(`${API_BASE}/auth/profile/${userId}`, {}, 3000);
+        if (res.ok) return await res.json();
+      } catch (e) {}
+    }
+    const db = getLocalDb();
+    return (db.users || []).find(u => Number(u.id) === Number(userId)) || null;
+  },
+
   updateProfile: async (userId, data) => {
+    let result = null;
     if (!isStaticHost) {
       try {
         const res = await fetch(`${API_BASE}/auth/profile/${userId}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(typeof getAuthHeaders === 'function' ? getAuthHeaders() : {})
+          },
           body: JSON.stringify(data)
         });
-        if (res.ok) return await res.json();
+        if (res.ok) {
+          result = await res.json();
+        }
       } catch (e) {}
     }
 
     const db = getLocalDb();
-    db.users = (db.users || []).map(u => Number(u.id) === Number(userId) ? { ...u, ...data } : u);
+    db.users = (db.users || []).map(u => Number(u.id) === Number(userId) ? { ...u, ...data, ...(result?.user || {}) } : u);
     saveLocalDb(db);
-    return { success: true };
+    notifyDataUpdated('user');
+    return result || { success: true };
   },
 
   changePassword: async (userId, currentPassword, newPassword) => {
