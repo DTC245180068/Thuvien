@@ -16,6 +16,20 @@ const THINKING_MESSAGES = [
   'Đang tổng hợp thông tin gửi bạn nè... ✨'
 ];
 
+const renderFormattedMessage = (rawText) => {
+  if (!rawText) return null;
+  const parts = String(rawText).split(/(\*\*[^*]+\*\*|\*[^*\n]+\*)/g);
+  return parts.map((part, idx) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return <strong key={idx} style={{ fontWeight: 700 }}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+      return <em key={idx} style={{ fontStyle: 'italic' }}>{part.slice(1, -1)}</em>;
+    }
+    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  });
+};
+
 export default function AIChatWidget({ books = [] }) {
   const [isOpen, setIsOpen] = useState(false);
   const [sessionId, setSessionId] = useState(() => `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
@@ -367,28 +381,8 @@ export default function AIChatWidget({ books = [] }) {
 
                   <div style={{ maxWidth: '82%' }}>
                     <div style={{ padding: '11px 15px', borderRadius: isAi ? '6px 20px 20px 20px' : '20px 6px 20px 20px', background: isAi ? '#ffffff' : 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)', color: isAi ? '#1e293b' : '#ffffff', fontSize: '13px', lineHeight: 1.6, boxShadow: isAi ? '0 2px 8px rgba(0, 0, 0, 0.04)' : '0 4px 12px rgba(37, 99, 235, 0.2)', border: isAi ? '1px solid #e2e8f0' : 'none', wordBreak: 'break-word', whiteSpace: 'pre-line' }}>
-                      {/* Vết gọi hàm Function Calling minh chứng Mô hình 2 */}
-                      {isAi && msg.tool_call && (
-                        <div style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          marginBottom: '8px',
-                          padding: '3px 8px',
-                          background: '#f8fafc',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: '6px',
-                          fontSize: '11px',
-                          fontFamily: 'monospace',
-                          boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
-                        }}>
-                          <span style={{ color: '#4f46e5', fontWeight: 700 }}>⚡ Tool:</span>
-                          <span style={{ color: '#0284c7', fontWeight: 600 }}>{msg.tool_call.name}()</span>
-                          <span style={{ color: '#16a34a', fontSize: '10px', fontWeight: 700 }}>✓ CSDL</span>
-                        </div>
-                      )}
 
-                      <div>{msg.text}</div>
+                      <div>{renderFormattedMessage(msg.text)}</div>
 
                       {/* Gợi ý sách theo schema chuẩn Word (suggested_books: [{book_id, title, reason}]) */}
                       {isAi && msg.suggested_books && msg.suggested_books.length > 0 && (

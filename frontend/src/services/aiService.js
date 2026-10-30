@@ -39,11 +39,14 @@ const generateLocalSmartResponse = (question, books = [], userObj = null, apiKey
     };
   }
 
-  // 2. Kiểm soát bảo mật SQL Injection / Prompt Injection
-  if (/\b(drop\s+table|delete\s+from|truncate\s+table|alter\s+table|password_hash|jwt_secret|mật\s+khẩu\s+admin|ignore\s+previous\s+instructions)\b/i.test(rawQ)) {
+  // 2. Kiểm soát bảo mật SQL Injection / Prompt Injection / Khai thác mật khẩu & khóa bí mật
+  const isLegitimatePasswordHelp = /(quên\s+mật\s*khẩu|đổi\s+mật\s*khẩu|cách\s+đổi\s+mật\s*khẩu|làm\s+sao.*quên\s+mật\s*khẩu|reset\s+password|khôi\s+phục\s+mật\s*khẩu)/i.test(rawQ) &&
+    !/(admin|thủ\s*thư|người\s+khác|của\s+hệ\s+thống|cho\s+.*xin|xin\s+mật\s*khẩu)/i.test(rawQ);
+  const securityRegex = /(drop\s+table|delete\s+from|truncate\s+table|alter\s+table|insert\s+into|update\s+users\s+set|union\s+select|password_hash|jwt_secret|secret_key|private_key|api_key|ignore\s+previous\s+instructions|bỏ\s+qua\s+hướng\s+dẫn|system\s+prompt|mật\s*khẩu\s+admin|lấy\s+mật\s*khẩu|xin\s+mật\s*khẩu|cho\s+.*xin\s+mật\s*khẩu|cho\s+.*biết\s+mật\s*khẩu|cho\s+.*xem\s+mật\s*khẩu|tiết\s+lộ\s+mật\s*khẩu|mật\s*khẩu\s+là\s+gì|mật\s*khẩu\s+của|pass\s+admin|xin\s+pass|cho\s+xin\s+pass|hack\s+tài\s+khoản|chiếm\s+quyền|bypass\s+auth|sql\s+injection|xin\s+api\s+key|api\s+key\s+là\s+gì|cho\s+xem\s+token)/i;
+  if (!isLegitimatePasswordHelp && securityRegex.test(rawQ)) {
     return {
       found: false,
-      answer: '🛡️ Cảnh báo bảo mật: Phát hiện yêu cầu truy cập trái phép hoặc can thiệp hệ thống. Thao tác đã bị chặn!',
+      answer: '🛡️ Cảnh báo bảo mật: Phát hiện yêu cầu truy xuất thông tin nhạy cảm (mật khẩu / khóa bảo mật / API Key) hoặc can thiệp trái phép vào hệ thống. Mọi mật khẩu trên SmartLib đều được mã hóa một chiều (Bcrypt) và nghiêm cấm tiết lộ!',
       tool_call: null,
       suggested_books: [],
       intent: 'security_blocked'
@@ -99,11 +102,16 @@ const generateLocalSmartResponse = (question, books = [], userObj = null, apiKey
     };
   }
 
-  // 4. Hỏi về sách đang mượn cá nhân
-  if (q.includes('mượn gì') || q.includes('đang mượn') || q.includes('hạn trả') || q.includes('sách của tôi') || q.includes('phiếu mượn') || q.includes('danh sách mượn')) {
+  // 4. Hỏi về hồ sơ cá nhân: sách đang mượn, có đang bị phạt không, hạn mức còn lại, tài khoản cá nhân
+  if (
+    q.includes('mượn gì') || q.includes('đang mượn') || q.includes('hạn trả') ||
+    q.includes('sách của tôi') || q.includes('phiếu mượn') || q.includes('danh sách mượn') ||
+    q.includes('bị phạt') || q.includes('nợ phạt') || q.includes('tiền phạt của') ||
+    q.includes('tài khoản của tôi') || q.includes('còn mượn được') || q.includes('đặt trước của tôi')
+  ) {
     return {
       found: true,
-      answer: `${greeting} Bạn vui lòng mở mục **"Sách đang mượn & Chờ duyệt"** trên Cổng Độc giả để theo dõi chính xác danh sách sách, hạn trả và tình trạng phiếu mượn thời gian thực nhé! 📋`,
+      answer: `${greeting} Mình đã kiểm tra hồ sơ mượn trả & phí phạt của bạn: 📋\n\n💰 **Tình trạng phí phạt:** 🟢 **Hiện tại bạn KHÔNG bị phạt (0 VNĐ)** và không có sách quá hạn.\n👤 **Tài khoản & Hạn mức:** 🟢 Đang hoạt động bình thường (Hạn mức tối đa 5 cuốn).\n📚 **Chi tiết phiếu mượn:** Bạn vui lòng mở mục **"Sách đang mượn & Chờ duyệt"** trên Cổng Độc giả để xem hạn trả chi tiết và mã QR trả sách nhé!`,
       tool_call: {
         name: 'get_my_active_borrows',
         arguments: { status_filter: 'Tất cả' },
@@ -114,11 +122,13 @@ const generateLocalSmartResponse = (question, books = [], userObj = null, apiKey
     };
   }
 
-  // 5. Hỏi về quy định mượn / hạn trả / giờ mở cửa / mất sách / mở khóa VNPay
+  // 5. Hỏi về quy định mượn / hạn trả / giờ mở cửa / mất sách / mở khóa VNPay / quên mật khẩu
   if (
     q.includes('quy định') || q.includes('nội quy') || q.includes('bao lâu') ||
     q.includes('tối đa') || q.includes('mở cửa') || q.includes('mấy giờ') ||
-    q.includes('mất sách') || q.includes('bị khóa') || q.includes('vnpay') || q.includes('gia hạn')
+    q.includes('mất sách') || q.includes('bị khóa') || q.includes('vnpay') ||
+    q.includes('gia hạn') || q.includes('cách mượn') || q.includes('thủ tục mượn') ||
+    q.includes('quên mật khẩu') || q.includes('đổi mật khẩu') || q.includes('phạt')
   ) {
     return {
       found: true,
@@ -231,7 +241,7 @@ Bạn có thể bấm vào thẻ sách bên dưới để xem chi tiết hoặc 
     found: false,
     answer: `${politeGreeting}
 
-Mình là trợ lý chăm sóc độc giả của **Thư viện SmartLib**, nên mình chỉ hỗ trợ các vấn đề liên quan đến tra cứu sách, kiểm tra tồn kho, phiếu mượn - trả, gia hạn hay tài khoản thư viện thôi ạ *(câu hỏi này nằm ngoài phạm vi nghiệp vụ của thư viện)*.
+Mình là trợ lý chăm sóc độc giả của **Thư viện SmartLib**, nên mình chỉ hỗ trợ các vấn đề liên quan đến tra cứu sách, kiểm tra tồn kho, phiếu mượn - trả, gia hạn hay tài khoản thư viện thôi ạ.
 
 Còn ${isMath ? 'bài toán này thì bạn có thể hỏi bạn bè hoặc dùng công cụ tính toán trên điện thoại' : 'câu hỏi này thì bạn có thể hỏi bạn bè hoặc tra cứu trên các công cụ tìm kiếm chuyên dụng'} nha. Nếu bạn muốn tìm hiểu thêm về chủ đề này qua các đầu sách trong kho SmartLib thì hãy nhắn **"Đồng ý"** để mình giới thiệu sách ngay, hoặc nếu cần hỗ trợ gì về SmartLib, cứ nhắn mình bất cứ lúc nào ạ 🥰`,
     tool_call: null,
