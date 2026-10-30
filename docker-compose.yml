@@ -85,7 +85,8 @@ services:
     restart: unless-stopped
     ports:
       # Mở cả cổng 80 chuẩn HTTP, 443 HTTPS an toàn và 3000
-      - "80:80"
+      # Cổng HTTP tránh xung đột port 80 với Windows IIS/HTTP.sys
+      - "${FRONTEND_PORT:-8088}:80"
       - "443:443"
     volumes:
       # Gắn cấu hình Nginx và chứng chỉ SSL vào container
