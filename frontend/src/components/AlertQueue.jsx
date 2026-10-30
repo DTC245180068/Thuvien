@@ -1,9 +1,61 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ShieldAlert, AlertTriangle, CheckCircle, RefreshCw, 
-  Lock, X, ExternalLink, Clock, UserX, BookX, Zap, Check, Eye
+  AlertTriangle, AlertCircle, RefreshCw, 
+  Lock, X, Clock, Zap, Shield, ShieldCheck, Calendar, Check
 } from 'lucide-react';
 import { api } from '../services/api';
+
+/**
+ * Helper: Tô màu đỏ gạch chân nổi bật phần thời gian đo được (VD: 0.1 phút, 5.9 phút)
+ * trong khi giữ nguyên ngưỡng (< 15 phút) dạng chữ thường, khớp 100% Ảnh 2.
+ */
+const renderHighlightedReason = (reason) => {
+  if (!reason) return null;
+  const parts = reason.split(/(\b\d+(?:\.\d+)?\s*(?:phút|giây|giờ)\b|\b\d+\s*cuốn\s*sách\s*liên\s*tiếp\b)/i);
+
+  return (
+    <span style={{ fontWeight: 500 }}>
+      {parts.map((part, index) => {
+        const prevPart = parts[index - 1] || '';
+        const isThreshold = prevPart.includes('<') || prevPart.includes('ngưỡng');
+
+        if (/^\d+(?:\.\d+)?\s*(?:phút|giây|giờ)$/i.test(part.trim()) && !isThreshold) {
+          return (
+            <span
+              key={index}
+              style={{
+                color: '#b91c1c',
+                fontWeight: 700,
+                textDecoration: 'underline',
+                textUnderlineOffset: '3px'
+              }}
+            >
+              {part}
+            </span>
+          );
+        }
+
+        if (/^\d+\s*cuốn\s*sách\s*liên\s*tiếp$/i.test(part.trim())) {
+          return (
+            <span
+              key={index}
+              style={{
+                color: '#b91c1c',
+                fontWeight: 700,
+                textDecoration: 'underline',
+                textUnderlineOffset: '3px'
+              }}
+            >
+              {part}
+            </span>
+          );
+        }
+
+        return part;
+      })}
+    </span>
+  );
+};
 
 export default function AlertQueue({ onClose, onLockReader }) {
   const [anomalies, setAnomalies] = useState([]);
@@ -14,10 +66,19 @@ export default function AlertQueue({ onClose, onLockReader }) {
   const fetchAnomalies = async () => {
     setLoading(true);
     try {
-      const data = await api.getFlaggedAnomalies();
-      setAnomalies(data || []);
+      const data = await Promise.race([
+        api.getFlaggedAnomalies(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 4000))
+      ]);
+      setAnomalies(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error('Lỗi khi tải danh sách bất thường:', err);
+      console.warn('Lỗi hoặc timeout khi tải danh sách bất thường:', err);
+      try {
+        const localData = await api.getFlaggedAnomalies();
+        setAnomalies(Array.isArray(localData) ? localData : []);
+      } catch (e) {
+        setAnomalies([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -25,6 +86,11 @@ export default function AlertQueue({ onClose, onLockReader }) {
 
   useEffect(() => {
     fetchAnomalies();
+    // Auto refresh every 60s
+    const interval = setInterval(() => {
+      fetchAnomalies();
+    }, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleScanNow = async () => {
@@ -32,7 +98,7 @@ export default function AlertQueue({ onClose, onLockReader }) {
     try {
       await api.triggerAnomalyScan();
       await fetchAnomalies();
-      setActionSuccess('Đã hoàn tất quét toàn bộ giao dịch!');
+      setActionSuccess('Đã quét thành công');
       setTimeout(() => setActionSuccess(''), 3000);
     } catch (err) {
       console.error(err);
@@ -52,219 +118,679 @@ export default function AlertQueue({ onClose, onLockReader }) {
     }
   };
 
-  const handleSimulateTestData = async () => {
-    setScanning(true);
-    try {
-      await api.simulateTestAnomalies();
-      await fetchAnomalies();
-      setActionSuccess('Đã tạo 6 giao dịch bất thường mẫu!');
-      setTimeout(() => setActionSuccess(''), 3000);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setScanning(false);
-    }
-  };
-
   return (
-    <div className="relative flex flex-col h-[650px] max-h-[85vh] w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden text-gray-800">
-      
-      {/* 1. Header của Modal:
-          Bỏ nền đỏ chót đi. Chuyển sang nền trắng thông thường bg-white border-b, tiêu đề chữ dùng màu text-red-600 font-bold text-xl */}
-      <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center border border-red-100">
-            <ShieldAlert className="w-6 h-6 text-red-600" />
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-red-600 flex items-center gap-2.5">
-              Hàng đợi Cảnh báo Bất thường (AI Anomaly Queue)
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">
-                {anomalies.length} vi phạm
-              </span>
-            </h3>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Phát hiện mượn - trả dưới 15 phút hoặc độc giả báo mất liên tục 5 cuốn sách
-            </p>
-          </div>
-        </div>
+    /* 1. Backdrop tối mờ kính */
+    <div 
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(15, 23, 42, 0.65)',
+        backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)',
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px',
+        animation: 'fadeIn 0.2s ease'
+      }}
+      onClick={onClose}
+    >
+      {/* 2. Main Modal Card */}
+      <div 
+        style={{
+          width: '100%',
+          maxWidth: '820px',
+          backgroundColor: '#ffffff',
+          borderRadius: '24px',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+          overflow: 'hidden',
+          border: '1px solid rgba(226, 232, 240, 0.9)',
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: '90vh',
+          fontFamily: "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        
+        {/* 3. Header Banner (Gradient Đỏ chuẩn Ảnh 2) */}
+        <div 
+          style={{
+            background: 'linear-gradient(135deg, #b91c1c 0%, #be123c 55%, #991b1b 100%)',
+            padding: '22px 26px 18px 26px',
+            color: '#ffffff',
+            position: 'relative',
+            overflow: 'hidden'
+          }}
+        >
+          {/* Subtle glow decoration */}
+          <div style={{ position: 'absolute', right: '-20px', top: '-20px', width: '180px', height: '180px', background: 'rgba(255,255,255,0.08)', borderRadius: '50%', filter: 'blur(20px)', pointerEvents: 'none' }} />
 
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 hover:text-gray-800 transition-colors cursor-pointer"
-            aria-label="Đóng cửa sổ"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
-      </div>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', position: 'relative', zIndex: 2 }}>
+            {/* Left: Icon & Title */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
+              <div 
+                style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '14px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.16)',
+                  border: '1px solid rgba(255, 255, 255, 0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}
+              >
+                <AlertTriangle style={{ width: '22px', height: '22px', color: '#ffffff' }} />
+              </div>
 
-      {/* Toolbar điều khiển */}
-      <div className="px-6 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between gap-3 text-xs flex-wrap">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleScanNow}
-            disabled={scanning || loading}
-            className="px-3.5 py-1.5 rounded-lg bg-white border border-gray-300 hover:border-red-400 hover:bg-red-50 text-gray-700 hover:text-red-700 font-medium flex items-center gap-1.5 shadow-xs transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${scanning ? 'animate-spin text-red-600' : ''}`} />
-            <span>Quét AI ngay</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSimulateTestData}
-            disabled={scanning || loading}
-            className="px-3.5 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 font-medium flex items-center gap-1.5 shadow-xs transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
-          >
-            <Zap className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Tạo dữ liệu vi phạm mẫu</span>
-          </button>
-        </div>
-
-        {actionSuccess && (
-          <div className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-md flex items-center gap-1.5 animate-fade-in">
-            <Check className="w-3.5 h-3.5" />
-            <span>{actionSuccess}</span>
-          </div>
-        )}
-
-        <div className="text-gray-500 font-medium">
-          Chu kỳ nền: <span className="font-semibold text-gray-700">Tự động quét mỗi 60s</span>
-        </div>
-      </div>
-
-      {/* Body List */}
-      <div className="flex-1 p-6 overflow-y-auto bg-gray-50/60">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-3">
-            <RefreshCw className="w-8 h-8 animate-spin text-red-500" />
-            <span className="text-sm font-semibold">Đang kiểm tra dữ liệu mượn trả...</span>
-          </div>
-        ) : anomalies.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-center p-6 bg-white rounded-2xl border border-gray-200 shadow-sm">
-            <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center mb-3">
-              <CheckCircle className="w-9 h-9" />
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.2px' }}>
+                    Hàng đợi Cảnh báo Bất thường <span style={{ fontWeight: 500, opacity: 0.9 }}>(AI Anomaly Queue)</span>
+                  </h2>
+                  <span 
+                    style={{
+                      backgroundColor: '#ffffff',
+                      color: '#dc2626',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      padding: '2px 10px',
+                      borderRadius: '9999px',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.4px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                    }}
+                  >
+                    {anomalies.length} VI PHẠM
+                  </span>
+                </div>
+                <p style={{ margin: '4px 0 0 0', fontSize: '12.5px', color: 'rgba(255, 255, 255, 0.88)', lineHeight: 1.4 }}>
+                  Phát hiện giao dịch mượn-trả siêu tốc &lt; 15 phút hoặc độc giả báo mất liên tiếp
+                </p>
+              </div>
             </div>
-            <h4 className="font-bold text-gray-800 text-base mb-1">
-              Hệ thống an toàn! Không có giao dịch bất thường nào
-            </h4>
-            <p className="text-xs text-gray-500 max-w-md mb-4">
-              Không phát hiện phiếu mượn - trả siêu tốc dưới 15 phút hoặc tài khoản báo mất liên tiếp.
-            </p>
+
+            {/* Right: Close button */}
+            {onClose && (
+              <button 
+                type="button" 
+                onClick={onClose}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'rgba(255, 255, 255, 0.75)',
+                  cursor: 'pointer',
+                  padding: '6px',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = '#ffffff';
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.16)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = 'rgba(255, 255, 255, 0.75)';
+                  e.currentTarget.style.background = 'transparent';
+                }}
+                aria-label="Đóng cửa sổ"
+                title="Đóng (ESC)"
+              >
+                <X style={{ width: '20px', height: '20px' }} />
+              </button>
+            )}
+          </div>
+
+          {/* Hàng 3 chip metadata bán trong suốt chuẩn Ảnh 2 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '14px', flexWrap: 'wrap', position: 'relative', zIndex: 2 }}>
+            <div 
+              style={{
+                background: 'rgba(0, 0, 0, 0.18)',
+                border: '1px solid rgba(255, 255, 255, 0.14)',
+                borderRadius: '9999px',
+                padding: '3px 12px',
+                fontSize: '11.5px',
+                color: '#ffffff',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontWeight: 500
+              }}
+            >
+              <Clock style={{ width: '13px', height: '13px', opacity: 0.9 }} />
+              <span>Quét tự động mỗi 60s</span>
+            </div>
+            <div 
+              style={{
+                background: 'rgba(0, 0, 0, 0.18)',
+                border: '1px solid rgba(255, 255, 255, 0.14)',
+                borderRadius: '9999px',
+                padding: '3px 12px',
+                fontSize: '11.5px',
+                color: '#ffffff',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontWeight: 500
+              }}
+            >
+              <Shield style={{ width: '13px', height: '13px', opacity: 0.9 }} />
+              <span>Rule-based Engine</span>
+            </div>
+            <div 
+              style={{
+                background: 'rgba(0, 0, 0, 0.18)',
+                border: '1px solid rgba(255, 255, 255, 0.14)',
+                borderRadius: '9999px',
+                padding: '3px 12px',
+                fontSize: '11.5px',
+                color: '#ffffff',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontWeight: 500
+              }}
+            >
+              <Zap style={{ width: '13px', height: '13px', opacity: 0.9 }} />
+              <span>Cập nhật trực tiếp CSDL</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 4. Sub-Toolbar chuẩn Ảnh 2 */}
+        <div 
+          style={{
+            backgroundColor: '#ffffff',
+            borderBottom: '1px solid #e2e8f0',
+            padding: '12px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            flexWrap: 'wrap'
+          }}
+        >
+          {/* Left: Button Quét AI ngay */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <button
               type="button"
-              onClick={handleSimulateTestData}
-              className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+              onClick={handleScanNow}
+              disabled={scanning || loading}
+              style={{
+                backgroundColor: '#4f46e5',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '10px',
+                padding: '8px 16px',
+                fontSize: '12px',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                cursor: scanning || loading ? 'not-allowed' : 'pointer',
+                boxShadow: '0 1px 2px rgba(79, 70, 229, 0.3)',
+                opacity: scanning || loading ? 0.7 : 1,
+                transition: 'all 0.15s'
+              }}
+              onMouseEnter={(e) => !scanning && !loading && (e.currentTarget.style.backgroundColor = '#4338ca')}
+              onMouseLeave={(e) => !scanning && !loading && (e.currentTarget.style.backgroundColor = '#4f46e5')}
+              title="Kích hoạt quét toàn bộ CSDL tìm giao dịch bất thường"
             >
-              <Zap className="w-4 h-4" />
-              Thử nghiệm tạo vi phạm mẫu
+              <RefreshCw style={{ width: '13px', height: '13px' }} className={scanning ? 'animate-spin' : ''} />
+              <span>{scanning ? 'Đang quét...' : 'Quét AI ngay'}</span>
             </button>
-          </div>
-        ) : (
-          anomalies.map((item) => {
-            return (
-              /* 2. Thiết kế thẻ vi phạm (Violation Cards):
-                 Mỗi vi phạm là một Card riêng biệt. Bọc bằng bg-white border border-gray-200 rounded-xl shadow-sm p-5 mb-4 */
-              <div
-                key={item.id}
-                className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 mb-4"
+
+            {actionSuccess && (
+              <div 
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: '#16a34a',
+                  backgroundColor: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
               >
-                {/* Hàng 1 (Header của thẻ): Dùng flex justify-between items-center mb-3.
-                    Bên trái là Badge điểm Score (bg-red-100 text-red-700 px-2 py-1 rounded font-semibold text-sm).
-                    Bên phải là cụm nút hành động (Gỡ cờ, Khóa) dùng style nút bấm rõ ràng border rounded-lg px-3 py-1.5 text-sm */}
-                <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
-                  {/* Bên trái: Badge điểm Score & ID */}
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    <span className="font-mono text-xs text-gray-400 font-semibold">
-                      #{item.id}
-                    </span>
-                    <span className="bg-red-100 text-red-700 px-2 py-1 rounded font-semibold text-sm flex items-center gap-1.5">
-                      <AlertTriangle className="w-4 h-4 text-red-600" />
-                      Score: {item.anomaly_score} {item.anomaly_score >= 0.95 ? '• NGUY HIỂM' : '• CẢNH BÁO'}
-                    </span>
-                    <span className="text-xs text-gray-400">•</span>
-                    <span className="text-xs text-gray-500">
-                      Trạng thái: <strong className="text-gray-700 font-semibold">{item.status}</strong>
-                    </span>
-                  </div>
+                <Check style={{ width: '13px', height: '13px' }} />
+                <span>{actionSuccess}</span>
+              </div>
+            )}
+          </div>
 
-                  {/* Bên phải: Cụm nút hành động */}
-                  <div className="flex items-center gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => handleResolve(item.id)}
-                      className="border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg px-3 py-1.5 text-sm font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-                      title="Đánh dấu đã kiểm tra an toàn và gỡ cờ"
-                    >
-                      <Check className="w-4 h-4 text-emerald-600" />
-                      <span>Gỡ cờ</span>
-                    </button>
+          {/* Right: Trạng thái Giám sát hoạt động mượn trả 24/7 */}
+          <div 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '12px',
+              color: '#475569',
+              fontWeight: 500
+            }}
+          >
+            <span style={{ position: 'relative', display: 'flex', height: '9px', width: '9px' }}>
+              <span 
+                style={{
+                  position: 'absolute',
+                  display: 'inline-flex',
+                  height: '100%',
+                  width: '100%',
+                  borderRadius: '50%',
+                  backgroundColor: '#34d399',
+                  opacity: 0.75,
+                  animation: 'ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite'
+                }} 
+              />
+              <span 
+                style={{
+                  position: 'relative',
+                  display: 'inline-flex',
+                  borderRadius: '50%',
+                  height: '9px',
+                  width: '9px',
+                  backgroundColor: '#10b981'
+                }} 
+              />
+            </span>
+            <span>Giám sát hoạt động mượn trả 24/7</span>
+          </div>
+        </div>
 
-                    {onLockReader && (
+        {/* 5. Danh sách thẻ vi phạm (Card List - Nền Slate nhạt để làm nổi bật các thẻ Trắng) */}
+        <div 
+          style={{
+            backgroundColor: '#f8fafc',
+            padding: '24px',
+            overflowY: 'auto',
+            maxHeight: '58vh',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '18px',
+            flex: 1
+          }}
+        >
+          {loading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px', color: '#94a3b8', gap: '12px' }}>
+              <div style={{ width: '48px', height: '48px', borderRadius: '16px', backgroundColor: '#fef2f2', border: '1px solid #fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <RefreshCw className="animate-spin" style={{ width: '22px', height: '22px', color: '#ef4444' }} />
+              </div>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>Đang phân tích dữ liệu mượn trả...</span>
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>Kiểm tra mốc thời gian và tần suất báo mất</span>
+            </div>
+          ) : anomalies.length === 0 ? (
+            <div 
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '48px 24px',
+                textAlign: 'center',
+                backgroundColor: '#ffffff',
+                borderRadius: '16px',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+              }}
+            >
+              <div style={{ width: '60px', height: '60px', borderRadius: '18px', backgroundColor: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
+                <ShieldCheck style={{ width: '32px', height: '32px' }} />
+              </div>
+              <h4 style={{ fontSize: '16px', fontWeight: 700, color: '#0f172a', margin: '0 0 6px 0' }}>
+                Hệ thống an toàn! Không có giao dịch bất thường nào
+              </h4>
+              <p style={{ fontSize: '12.5px', color: '#64748b', maxWidth: '440px', margin: 0, lineHeight: 1.5 }}>
+                Không phát hiện phiếu mượn-trả dưới 15 phút hoặc tài khoản báo mất sách liên tiếp. Toàn bộ hoạt động thư viện đang diễn ra bình thường.
+              </p>
+            </div>
+          ) : (
+            anomalies.map((item) => {
+              const score = Number(item.anomaly_score ?? 0);
+              const isCritical = score >= 0.95;
+
+              return (
+                <div
+                  key={item.id}
+                  style={{
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '16px',
+                    padding: '20px 24px',
+                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}
+                >
+                  {/* Card Top Row: ID Badge + Score Badge + Status + Actions */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      {/* ID Badge */}
+                      <span 
+                        style={{
+                          backgroundColor: '#f1f5f9',
+                          color: '#475569',
+                          fontFamily: 'monospace',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          border: '1px solid #e2e8f0'
+                        }}
+                      >
+                        #{item.id}
+                      </span>
+
+                      {/* Badge điểm rủi ro: Đỏ nếu Score >= 0.95, Hổ phách nếu Score < 0.95 */}
+                      {isCritical ? (
+                        <span 
+                          style={{
+                            backgroundColor: '#fef2f2',
+                            color: '#dc2626',
+                            border: '1px solid #fecaca',
+                            fontSize: '11.5px',
+                            fontWeight: 700,
+                            padding: '2px 10px',
+                            borderRadius: '9999px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px'
+                          }}
+                        >
+                          <AlertTriangle style={{ width: '13px', height: '13px', color: '#dc2626' }} />
+                          <span>Score: {score.toFixed(2)} • NGUY HIỂM CAO</span>
+                        </span>
+                      ) : (
+                        <span 
+                          style={{
+                            backgroundColor: '#fffbeb',
+                            color: '#b45309',
+                            border: '1px solid #fde68a',
+                            fontSize: '11.5px',
+                            fontWeight: 700,
+                            padding: '2px 10px',
+                            borderRadius: '9999px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px'
+                          }}
+                        >
+                          <AlertCircle style={{ width: '13px', height: '13px', color: '#b45309' }} />
+                          <span>Score: {score.toFixed(2)} • CẢNH BÁO</span>
+                        </span>
+                      )}
+
+                      {/* Status */}
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>
+                        Trạng thái: <strong style={{ color: '#0f172a', fontWeight: 600 }}>{item.status || 'Đã trả'}</strong>
+                      </span>
+                    </div>
+
+                    {/* Cụm nút hành động "Gỡ cờ" và "Khóa độc giả" */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <button
                         type="button"
-                        onClick={() => onLockReader(item.user_id, item.anomaly_reason)}
-                        className="border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg px-3 py-1.5 text-sm font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-                        title="Khóa tài khoản độc giả này để ngăn chặn thất thoát"
+                        onClick={() => handleResolve(item.id)}
+                        style={{
+                          backgroundColor: '#ffffff',
+                          color: '#16a34a',
+                          border: '1px solid #bbf7d0',
+                          borderRadius: '8px',
+                          padding: '4px 12px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#f0fdf4';
+                          e.currentTarget.style.borderColor = '#86efac';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#ffffff';
+                          e.currentTarget.style.borderColor = '#bbf7d0';
+                        }}
+                        title="Đánh dấu đã kiểm tra an toàn và gỡ cờ cảnh báo"
                       >
-                        <Lock className="w-4 h-4 text-red-600" />
-                        <span>Khóa độc giả</span>
+                        <Check style={{ width: '13px', height: '13px', color: '#16a34a' }} />
+                        <span>Gỡ cờ</span>
                       </button>
-                    )}
+
+                      {onLockReader && (
+                        <button
+                          type="button"
+                          onClick={() => onLockReader(item.user_id, item.anomaly_reason)}
+                          style={{
+                            backgroundColor: '#ffffff',
+                            color: '#dc2626',
+                            border: '1px solid #fecaca',
+                            borderRadius: '8px',
+                            padding: '4px 12px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#fef2f2';
+                            e.currentTarget.style.borderColor = '#fca5a5';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = '#ffffff';
+                            e.currentTarget.style.borderColor = '#fecaca';
+                          }}
+                          title="Khóa tài khoản độc giả này để ngăn chặn nguy cơ thất thoát"
+                        >
+                          <Lock style={{ width: '13px', height: '13px', color: '#dc2626' }} />
+                          <span>Khóa độc giả</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Đường kẻ mỏng ngăn cách */}
+                  <div style={{ height: '1px', backgroundColor: '#f1f5f9', margin: '14px 0 16px 0' }} />
+
+                  {/* 2 Cột: ĐẦU SÁCH (Trái) & ĐỘC GIẢ (Phải) cân đối 50/50 */}
+                  <div 
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                      gap: '24px',
+                      marginBottom: '16px'
+                    }}
+                  >
+                    {/* Cột trái: ĐẦU SÁCH */}
+                    <div>
+                      <div 
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          color: '#94a3b8',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                          marginBottom: '4px'
+                        }}
+                      >
+                        ĐẦU SÁCH
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                          {item.book_title || 'Tài liệu thư viện'}
+                        </span>
+                        <span 
+                          style={{
+                            fontSize: '11px',
+                            color: '#64748b',
+                            backgroundColor: '#f1f5f9',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            fontWeight: 500
+                          }}
+                        >
+                          (ID: {item.book_id})
+                        </span>
+                      </div>
+
+                      <div 
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          color: '#94a3b8',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                          marginTop: '12px',
+                          marginBottom: '4px'
+                        }}
+                      >
+                        THỜI ĐIỂM MƯỢN
+                      </div>
+                      <div 
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          color: '#1e293b',
+                          fontSize: '12.5px',
+                          fontFamily: 'monospace',
+                          fontWeight: 600
+                        }}
+                      >
+                        <Calendar style={{ width: '13px', height: '13px', color: '#94a3b8' }} />
+                        <span>{(item.borrow_date || '').replace('T', ' ').substring(0, 19) || '–'}</span>
+                      </div>
+                    </div>
+
+                    {/* Cột phải: ĐỘC GIẢ */}
+                    <div>
+                      <div 
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          color: '#94a3b8',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                          marginBottom: '4px'
+                        }}
+                      >
+                        ĐỘC GIẢ
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                          {item.reader_name || 'Độc giả'}
+                        </span>
+                        <span 
+                          style={{
+                            fontSize: '11px',
+                            color: '#64748b',
+                            backgroundColor: '#f1f5f9',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            fontWeight: 500
+                          }}
+                        >
+                          (ID: {item.user_id})
+                        </span>
+                      </div>
+
+                      <div 
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          color: '#94a3b8',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                          marginTop: '12px',
+                          marginBottom: '4px'
+                        }}
+                      >
+                        TRẢ THỰC TẾ
+                      </div>
+                      <div 
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          color: '#1e293b',
+                          fontSize: '12.5px',
+                          fontFamily: 'monospace',
+                          fontWeight: 600
+                        }}
+                      >
+                        <Calendar style={{ width: '13px', height: '13px', color: '#94a3b8' }} />
+                        <span>{item.actual_return_date ? item.actual_return_date.replace('T', ' ').substring(0, 19) : 'Chưa trả'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Hộp cảnh báo nguyên nhân (Anomaly Callout Box) */}
+                  <div 
+                    style={{
+                      backgroundColor: '#fffdf0',
+                      border: '1px solid #fef08a',
+                      borderRadius: '10px',
+                      padding: '10px 14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '12px',
+                      color: '#854d0e',
+                      lineHeight: 1.4
+                    }}
+                  >
+                    <AlertCircle style={{ width: '14px', height: '14px', color: '#eab308', flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      {renderHighlightedReason(item.anomaly_reason)}
+                    </div>
                   </div>
                 </div>
+              );
+            })
+          )}
+        </div>
 
-                {/* 3. Phân cấp thông tin (Hierarchy) bên trong thẻ:
-                    Không dàn hàng ngang lộn xộn. Chia làm Grid 2 cột: grid grid-cols-2 gap-4 mb-3.
-                    Quy tắc Typography: Nhãn (Label) text-xs text-gray-500 uppercase, Giá trị (Value) text-sm font-medium text-gray-900 */}
-                <div className="grid grid-cols-2 gap-4 mb-3">
-                  <div>
-                    <div className="text-xs text-gray-500 uppercase tracking-wider">Đầu sách</div>
-                    <div className="text-sm font-medium text-gray-900 mt-0.5">
-                      {item.book_title} <span className="text-xs text-gray-400 font-normal">(ID: {item.book_id})</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500 uppercase tracking-wider">Độc giả</div>
-                    <div className="text-sm font-medium text-gray-900 mt-0.5">
-                      {item.reader_name} <span className="text-xs text-gray-400 font-normal">(ID: {item.user_id})</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500 uppercase tracking-wider">Ngày mượn</div>
-                    <div className="text-sm font-medium text-gray-900 mt-0.5">
-                      {(item.borrow_date || '').replace('T', ' ').substring(0, 19)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500 uppercase tracking-wider">Trả thực tế</div>
-                    <div className="text-sm font-medium text-gray-900 mt-0.5">
-                      {item.actual_return_date ? item.actual_return_date.replace('T', ' ').substring(0, 19) : 'Chưa trả'}
-                    </div>
-                  </div>
-                </div>
+        {/* 6. Technical Footer chuẩn Ảnh 2 */}
+        <div 
+          style={{
+            backgroundColor: '#ffffff',
+            borderTop: '1px solid #f1f5f9',
+            padding: '12px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+            fontSize: '11.5px',
+            color: '#64748b',
+            fontFamily: 'monospace'
+          }}
+        >
+          <div>
+            <span>&lt;/&gt; Thuật toán: </span>
+            <span style={{ color: '#334155', fontWeight: 600 }}>Rule-based Window Timing &amp; Consecutive Loss Frequency</span>
+          </div>
+          <div>
+            <span>Cập nhật cột </span>
+            <code style={{ color: '#dc2626', fontWeight: 700, padding: '1px 4px', backgroundColor: '#fef2f2', borderRadius: '4px' }}>is_flagged</code>
+            <span> &amp; </span>
+            <code style={{ color: '#dc2626', fontWeight: 700, padding: '1px 4px', backgroundColor: '#fef2f2', borderRadius: '4px' }}>anomaly_score</code>
+            <span> vào CSDL</span>
+          </div>
+        </div>
 
-                {/* 4. Thông báo lỗi cụ thể (Dòng Bất thường thời gian):
-                    Tách biệt hẳn ra ở dưới cùng của thẻ. Đặt trong một khung cảnh báo nhẹ: 
-                    bg-yellow-50 border-l-4 border-yellow-400 p-3 text-sm text-yellow-800 rounded-r */}
-                <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 text-sm text-yellow-800 rounded-r flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-yellow-600" />
-                  <span>{item.anomaly_reason}</span>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* Footer */}
-      <div className="p-3 bg-white border-t border-gray-200 text-[11.5px] text-gray-500 flex items-center justify-between px-6 shrink-0">
-        <span>🔍 Thuật toán: Rule-based Window Timing & Consecutive Loss Frequency Filtering</span>
-        <span>⚡ Cập nhật cột is_flagged & anomaly_score trực tiếp vào CSDL</span>
       </div>
     </div>
   );

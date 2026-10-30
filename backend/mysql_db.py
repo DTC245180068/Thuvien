@@ -370,8 +370,14 @@ class MySQLDatabaseManager:
         self._logged_offline = False
 
         # Khởi tạo persistent SQLite engine để nạp dữ liệu siêu tốc < 5ms khi MySQL chưa bật
-        self.db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "database", "smartlib_local.db"))
-        self.sql_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "database", "smartlib_mysql.sql"))
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        cand_db1 = os.path.join(base_dir, "database", "smartlib_local.db")
+        cand_db2 = os.path.abspath(os.path.join(base_dir, "..", "database", "smartlib_local.db"))
+        self.db_path = cand_db1 if os.path.exists(cand_db1) else cand_db2
+
+        cand_sql1 = os.path.join(base_dir, "database", "smartlib_mysql.sql")
+        cand_sql2 = os.path.abspath(os.path.join(base_dir, "..", "database", "smartlib_mysql.sql"))
+        self.sql_file_path = cand_sql1 if os.path.exists(cand_sql1) else cand_sql2
         try:
             self.sqlite_engine = create_engine(
                 f"sqlite:///{self.db_path}",
@@ -679,23 +685,26 @@ class MySQLDatabaseManager:
             ]
             dyn_s = get_dynamic_settings()
             lock_threshold = int(dyn_s.get("autoLockAfterDays", 3))
-            if pending_fines or u.get("pendingPaymentApproval"):
+            has_pending = len(pending_fines) > 0
+            if has_pending:
                 u["isLocked"] = True
                 u["pendingPaymentApproval"] = True
                 u["lockReason"] = "Giao dịch nộp phạt VNPay đang chờ Quản trị viên duyệt"
-            elif overdue_days_max >= lock_threshold:
-                u["isLocked"] = True
-                u["lockReason"] = f"Mượn sách quá hạn {overdue_days_max} ngày (Cần nộp phạt để mở khóa)"
             elif total_unpaid > 0:
                 u["isLocked"] = True
+                u["pendingPaymentApproval"] = False
                 u["lockReason"] = f"Còn khoản tiền phạt chưa thanh toán ({int(total_unpaid):,} đ)"
+            elif overdue_days_max >= lock_threshold:
+                if u.get("isLocked") or u.get("is_locked") or u.get("lockReason"):
+                    u["isLocked"] = True
+                    u["pendingPaymentApproval"] = False
+                    u["lockReason"] = f"Mượn sách quá hạn {overdue_days_max} ngày (Cần nộp phạt để mở khóa)"
             else:
-                # Nếu lý do khóa tự động trước đó đã được giải quyết
+                u["pendingPaymentApproval"] = False
                 current_reason = u.get("lockReason", "") or ""
-                if current_reason.startswith("Mượn sách quá hạn") or current_reason.startswith("Còn khoản tiền phạt") or current_reason.startswith("Giao dịch nộp phạt"):
+                if current_reason.startswith("Mượn sách quá hạn") or current_reason.startswith("Còn khoản tiền phạt") or current_reason.startswith("Giao dịch nộp phạt") or not current_reason:
                     u["isLocked"] = False
                     u["lockReason"] = ""
-                    u["pendingPaymentApproval"] = False
 
 
         return users
@@ -1017,8 +1026,12 @@ class MySQLDatabaseManager:
             lines.append("-- CƠ SỞ DỮ LIỆU MYSQL 8.0 CHUẨN 3NF TOÀN DIỆN (SYNCHRONIZED)")
             lines.append(f"-- Thời gian cập nhật tự động: {now_str}")
             lines.append("-- =====================================================================")
+            lines.append("SET NAMES utf8mb4;")
+            lines.append("SET CHARACTER SET utf8mb4;")
             lines.append("CREATE DATABASE IF NOT EXISTS `smartlib_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
             lines.append("USE `smartlib_db`;\n")
+            lines.append("SET NAMES utf8mb4;")
+            lines.append("SET CHARACTER SET utf8mb4;\n")
             lines.append("SET FOREIGN_KEY_CHECKS = 0;")
             lines.append("DROP TABLE IF EXISTS `notifications`;")
             lines.append("DROP TABLE IF EXISTS `fines`;")
@@ -1082,6 +1095,9 @@ class MySQLDatabaseManager:
             lines.append("    pending_renew_days INT NULL,")
             lines.append("    pending_renew_notes VARCHAR(255) NULL,")
             lines.append("    renew_count INT NOT NULL DEFAULT 0,")
+            lines.append("    is_flagged TINYINT(1) NOT NULL DEFAULT 0,")
+            lines.append("    anomaly_score DECIMAL(5,2) NULL DEFAULT 0.0,")
+            lines.append("    anomaly_reason VARCHAR(255) NULL,")
             lines.append("    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,")
             lines.append("    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,")
             lines.append("    CONSTRAINT fk_borrow_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,")
@@ -1318,20 +1334,19 @@ class MySQLDatabaseManager:
             except Exception as e:
                 logger.error(f"Lỗi hủy đặt trước trên MySQL: {e}")
 
-        db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "database", "smartlib_local.db"))
-        if os.path.exists(db_path):
+        if self.SqliteSession:
             try:
-                sqlite_engine = create_engine(f"sqlite:///{db_path}")
-                SqliteSession = sessionmaker(bind=sqlite_engine)
-                session = SqliteSession()
+                session = self.SqliteSession()
                 res = session.query(ReservationModel).filter_by(id=res_id).first()
                 if res:
                     res.status = "Cancelled"
                     session.commit()
-                session.close()
                 logger.info(f"✓ Đã cập nhật Cancelled cho đặt trước #{res_id} trong SQLite")
             except Exception as e:
                 logger.error(f"Lỗi hủy đặt trước trên SQLite: {e}")
+            finally:
+                if 'session' in locals():
+                    session.close()
 
     def toggle_reader_lock(self, reader_id: int, is_locked: bool, reason: Optional[str] = None):
         """Khóa hoặc mở khóa tài khoản độc giả trên cả MySQL và SQLite"""
@@ -1347,21 +1362,20 @@ class MySQLDatabaseManager:
             except Exception as e:
                 logger.error(f"Lỗi toggle_reader_lock trên MySQL: {e}")
 
-        db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "database", "smartlib_local.db"))
-        if os.path.exists(db_path):
+        if self.SqliteSession:
             try:
-                sqlite_engine = create_engine(f"sqlite:///{db_path}")
-                SqliteSession = sessionmaker(bind=sqlite_engine)
-                session = SqliteSession()
+                session = self.SqliteSession()
                 user = session.query(UserModel).filter_by(id=reader_id).first()
                 if user:
                     user.is_locked = is_locked
                     user.lock_reason = reason if is_locked else ""
                     session.commit()
-                session.close()
                 logger.info(f"✓ Đã cập nhật trạng thái khóa={is_locked} cho độc giả #{reader_id} trong SQLite")
             except Exception as e:
                 logger.error(f"Lỗi toggle_reader_lock trên SQLite: {e}")
+            finally:
+                if 'session' in locals():
+                    session.close()
 
     def atomic_borrow_book(
         self,
@@ -1814,12 +1828,9 @@ class MySQLDatabaseManager:
         meta: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         if not self.SessionLocal:
-            db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "database", "smartlib_local.db"))
-            if os.path.exists(db_path):
+            if self.SqliteSession:
                 try:
-                    sqlite_engine = create_engine(f"sqlite:///{db_path}")
-                    SqliteSession = sessionmaker(bind=sqlite_engine)
-                    session = SqliteSession()
+                    session = self.SqliteSession()
                     notif = NotificationModel(
                         recipient_role=recipient_role,
                         recipient_user_id=recipient_user_id,
@@ -1834,10 +1845,12 @@ class MySQLDatabaseManager:
                     session.commit()
                     session.refresh(notif)
                     res_dict = notif.to_dict()
-                    session.close()
                     return res_dict
                 except Exception as e:
                     logger.error(f"Lỗi khi add_notification vào SQLite: {e}")
+                finally:
+                    if 'session' in locals():
+                        session.close()
             return {
                 "id": 9999,
                 "recipientRole": recipient_role,

@@ -611,10 +611,10 @@ async def handle_admin_query(req: AdminQueryRequest):
 
     # 3. Kiểm tra ngay trên câu hỏi tự nhiên nếu người dùng cố tình hỏi mật khẩu hoặc truyền SQL nguy hiểm
     clean_prompt = re.sub(r"--.*?$|/\*.*?\*/", "", user_prompt, flags=re.MULTILINE | re.DOTALL).strip()
-    if re.search(r"\b(password_hash|password|mật\s*khẩu|jwt_secret)\b", clean_prompt, flags=re.IGNORECASE):
+    if re.search(r"\b(password_hash|password|mật\s*khẩu|jwt_secret|api_key|api\s*key|secret_key|xin\s+pass|access_token)\b", clean_prompt, flags=re.IGNORECASE):
         raise HTTPException(
             status_code=403,
-            detail="Cảnh báo bảo mật: Không được phép truy xuất trường dữ liệu nhạy cảm (mật khẩu / khóa bảo mật)."
+            detail="Cảnh báo bảo mật: Không được phép truy xuất trường dữ liệu nhạy cảm (mật khẩu / khóa bảo mật / API Key)."
         )
 
     if direct_sql:

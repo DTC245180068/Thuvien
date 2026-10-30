@@ -287,7 +287,7 @@ export default function LoginPage() {
               <input
                 type="password"
                 required
-                placeholder="Nhập mật khẩu (123)"
+                placeholder="Nhập mật khẩu (mặc định: 123)"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />

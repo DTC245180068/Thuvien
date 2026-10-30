@@ -152,6 +152,17 @@ export const AuthProvider = ({ children }) => {
     }
   }, [user, role]);
 
+  // Lắng nghe sự kiện token hết hạn để tự động đăng xuất
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      logout();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('smartlib:auth-expired', handleAuthExpired);
+      return () => window.removeEventListener('smartlib:auth-expired', handleAuthExpired);
+    }
+  }, []);
+
   const login = async (username, password) => {
     const res = await api.login(username, password);
     if (res && res.user) {

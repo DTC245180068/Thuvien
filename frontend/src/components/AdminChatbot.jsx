@@ -1,285 +1,432 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Bot, Send, Sparkles, Terminal, AlertCircle, 
-  CheckCircle2, Copy, Check, X, RefreshCw, Table as TableIcon,
-  Loader2
+import {
+  Bot, Send, Sparkles, Terminal, AlertCircle,
+  CheckCircle2, Copy, Check, X, Database,
+  Loader2, MessageSquare, Zap, Shield, ChevronRight, RotateCcw
 } from 'lucide-react';
 import { api } from '../services/api';
 
+// ─── Danh sách gợi ý nhanh ────────────────────────────────────────────────
 const QUICK_PROMPTS = [
-  'Liệt kê sách mượn quá hạn',
-  'Top 5 sách mượn nhiều nhất',
-  'Những sách nào còn sẵn trong kho',
-  'Danh sách độc giả bị khóa tài khoản',
-  'Các yêu cầu gia hạn đang chờ duyệt',
-  'Khoản tiền phạt chưa nộp'
+  { label: 'Sách quá hạn',          icon: '📚', query: 'Liệt kê sách mượn quá hạn' },
+  { label: 'Top mượn nhiều',         icon: '🔥', query: 'Top 5 sách mượn nhiều nhất' },
+  { label: 'Sách còn trong kho',     icon: '📦', query: 'Những sách nào còn sẵn trong kho' },
+  { label: 'Tài khoản bị khóa',      icon: '🔒', query: 'Danh sách độc giả bị khóa tài khoản' },
+  { label: 'Chờ duyệt gia hạn',      icon: '⏳', query: 'Các yêu cầu gia hạn đang chờ duyệt' },
+  { label: 'Tiền phạt chưa nộp',     icon: '💰', query: 'Khoản tiền phạt chưa nộp' },
 ];
 
+// ─── Tin nhắn chào mừng ban đầu ───────────────────────────────────────────
+const WELCOME_MSG = {
+  role: 'assistant',
+  text: 'Xin chào! Tôi là Trợ lý AI Text-to-SQL của SmartLib. Hãy đặt câu hỏi bằng tiếng Việt về kho sách, lịch sử mượn trả, độc giả hoặc tiền phạt — tôi sẽ tự động sinh và thực thi truy vấn SQL cho bạn.',
+  sql: null,
+  data: null,
+  columns: [],
+  error: null,
+};
+
 export default function AdminChatbot({ onClose }) {
-  const [inputText, setInputText] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [copied, setCopied] = useState(false);
-  const messagesEndRef = useRef(null);
+  const [inputText, setInputText]     = useState('');
+  const [loading, setLoading]         = useState(false);
+  const [errorMsg, setErrorMsg]       = useState('');
+  const [copied, setCopied]           = useState(false);
+  const [history, setHistory]         = useState([WELCOME_MSG]);
+  const messagesEndRef                = useRef(null);
+  const inputRef                      = useRef(null);
 
-  const [history, setHistory] = useState([
-    {
-      role: 'assistant',
-      text: 'Xin chào Quản trị viên! Tôi là Trợ lý AI Text-to-SQL. Bạn có thể hỏi bất kỳ câu hỏi nào bằng tiếng Việt về kho sách, mượn trả, độc giả hay tiền phạt.',
-      sql: null,
-      data: null,
-      columns: [],
-      error: null
-    }
-  ]);
+  // Tự cuộn xuống cuối mỗi khi history thay đổi
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [history, loading]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  // ── Gửi tin nhắn ─────────────────────────────────────────────────────────
+  const handleSend = async (queryOverride) => {
+    const q = (queryOverride ?? inputText).trim();
+    if (!q || loading) return;
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [history, loading]);
-
-  const handleSend = async (queryToSend) => {
-    const q = (queryToSend || inputText).trim();
-    if (!q || loading || isLoading) return;
-
-    const userMsg = { role: 'user', text: q };
-    setHistory(prev => [...prev, userMsg]);
+    setHistory(prev => [...prev, { role: 'user', text: q }]);
     setInputText('');
-    setIsLoading(true);
     setLoading(true);
-    setErrorMessage('');
+    setErrorMsg('');
+    inputRef.current?.focus();
 
     try {
       const res = await api.adminQueryAI(q);
-      const botMsg = {
-        role: 'assistant',
-        text: res.explanation || (res.success ? 'Đã truy vấn dữ liệu thành công từ cơ sở dữ liệu.' : 'Không thể thực thi câu truy vấn.'),
-        sql: res.sql,
-        columns: res.columns || [],
-        data: res.data || [],
+      setHistory(prev => [...prev, {
+        role:       'assistant',
+        text:       res.explanation || (res.success ? 'Truy vấn thành công.' : 'Không thể thực thi truy vấn.'),
+        sql:        res.sql,
+        columns:    res.columns || [],
+        data:       res.data    || [],
         total_rows: res.total_rows || 0,
-        error: res.error || null,
-        success: res.success
-      };
-      setHistory(prev => [...prev, botMsg]);
+        error:      res.error   || null,
+        success:    res.success,
+      }]);
     } catch (err) {
-      console.error(err);
-      const errMsg = err.message || 'Lỗi khi kết nối với AI Chatbot hoặc quá thời gian chờ (timeout). Vui lòng thử lại!';
-      setErrorMessage(errMsg);
-      setHistory(prev => [
-        ...prev,
-        {
-          role: 'assistant',
-          text: 'Rất tiếc, đã xảy ra lỗi trong quá trình xử lý câu truy vấn.',
-          error: errMsg,
-          success: false
-        }
-      ]);
+      const rawMsg = err.message || '';
+      let msg = rawMsg;
+      if (rawMsg.includes('aborted') || rawMsg.includes('timeout') || rawMsg.includes('thời gian')) {
+        msg = 'Yêu cầu xử lý AI quá thời gian chờ phản hồi từ Google/OpenAI. Đang tự động chuyển sang chế độ tìm kiếm trực tiếp trên dữ liệu thư viện.';
+      } else if (!msg) {
+        msg = 'Lỗi kết nối tới dịch vụ AI. Vui lòng thử lại sau!';
+      }
+      setErrorMsg(msg);
+      setHistory(prev => [...prev, {
+        role: 'assistant', text: 'Đã xảy ra lỗi khi xử lý yêu cầu của bạn.',
+        error: msg, success: false,
+      }]);
     } finally {
-      setIsLoading(false);
       setLoading(false);
     }
   };
 
-  const copyToClipboard = (code) => {
-    if (!code) return;
-    navigator.clipboard.writeText(code);
+  const copySQL = (sql) => {
+    if (!sql) return;
+    navigator.clipboard.writeText(sql);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  return (
-    /*
-     * Container chính: flex flex-col với chiều cao cố định.
-     * Bố cục 3 phần rõ rệt: Header (shrink-0), Body (flex-1 min-h-0 — KEY FIX), Footer (shrink-0).
-     * "min-h-0" là bắt buộc để Body thực sự cuộn được trong flex container.
-     */
-    <div className="flex flex-col w-full h-full bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden text-gray-800">
+  const resetChat = () => {
+    setHistory([WELCOME_MSG]);
+    setErrorMsg('');
+  };
 
-      {/* ── HEADER (cố định, shrink-0) ────────────────────────── */}
-      <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100 shadow-sm">
-            <Bot className="w-6 h-6 text-blue-600" />
+  // ── RENDER ────────────────────────────────────────────────────────────────
+  return (
+    <div className="flex flex-col w-full h-full bg-white rounded-2xl shadow-2xl overflow-hidden"
+         style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif" }}>
+
+      {/* ══ HEADER ══════════════════════════════════════════════════════════ */}
+      <div style={{
+        background: 'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 50%, #2563eb 100%)',
+        padding: '16px 20px',
+        flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          {/* Logo + tiêu đề */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Avatar AI */}
+            <div style={{
+              width: 42, height: 42, borderRadius: 12,
+              background: 'rgba(255,255,255,0.15)',
+              backdropFilter: 'blur(8px)',
+              border: '1.5px solid rgba(255,255,255,0.25)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <Bot size={22} color="#fff" />
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: '#fff', fontWeight: 700, fontSize: 15, letterSpacing: '-0.2px' }}>
+                  Trợ lý AI Text-to-SQL
+                </span>
+                {/* Badge LIVE */}
+                <span style={{
+                  background: '#22c55e', color: '#fff',
+                  fontSize: 10, fontWeight: 800, letterSpacing: 0.5,
+                  padding: '2px 8px', borderRadius: 999,
+                  textTransform: 'uppercase',
+                }}>
+                  LIVE
+                </span>
+              </div>
+              <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, margin: 0, marginTop: 2 }}>
+                Hỏi đáp trực tiếp cơ sở dữ liệu MySQL bằng tiếng Việt
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-bold text-base text-gray-900 flex items-center gap-2">
-              Trợ lý Truy vấn Thông minh (Text-to-SQL)
-              <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-extrabold uppercase">
-                AI Powered
-              </span>
-            </h3>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Hỏi đáp trực tiếp với cơ sở dữ liệu MySQL bằng Tiếng Việt tự nhiên
-            </p>
+
+          {/* Cụm nút công cụ */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={resetChat}
+              title="Làm mới cuộc trò chuyện"
+              style={{
+                height: 32,
+                borderRadius: 8,
+                background: 'rgba(255,255,255,0.12)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#fff', cursor: 'pointer', padding: '0 10px', gap: 5,
+                fontSize: 12, fontWeight: 500,
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.22)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.12)'}
+            >
+              <RotateCcw size={13} />
+              <span>Làm mới</span>
+            </button>
+
+            {/* Nút đóng */}
+            {onClose && (
+              <button type="button" onClick={onClose}
+                style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: 'rgba(255,255,255,0.12)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: '#fff', cursor: 'pointer',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.22)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.12)'}
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
         </div>
 
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 hover:text-gray-800 transition-colors cursor-pointer"
-            aria-label="Đóng"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
+        {/* Stat pills */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          {[
+            { icon: <Database size={11} />, label: 'MySQL & SQLite' },
+            { icon: <Shield size={11} />, label: 'Chỉ SELECT' },
+            { icon: <Zap size={11} />, label: 'AI Powered' },
+          ].map(({ icon, label }) => (
+            <div key={label} style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              background: 'rgba(255,255,255,0.12)',
+              border: '1px solid rgba(255,255,255,0.18)',
+              borderRadius: 999, padding: '3px 10px',
+              color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: 500,
+            }}>
+              {icon} {label}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* ── BODY (cuộn được) ──────────────────────────────────── */}
+      {/* ══ BODY ════════════════════════════════════════════════════════════ */}
       {/*
-       * [KEY FIX] flex-1 min-h-0:
-       *   - flex-1  → chiếm toàn bộ không gian còn lại theo chiều dọc
-       *   - min-h-0 → ghi đè min-height: auto mặc định của flex item,
-       *               cho phép overflow-y-auto hoạt động đúng
+       * flex-1 min-h-0: KEY FIX để overflow-y-auto hoạt động trong flex container.
+       * Thiếu min-h-0 → body không cuộn, tràn ra ngoài.
        */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-gray-50/60">
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 16px',
+                    background: '#f8fafc', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* Banner lỗi kết nối */}
-        {errorMessage && (
-          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span className="font-semibold">{errorMessage}</span>
+        {errorMsg && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 14px', borderRadius: 10,
+            background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: 13,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertCircle size={14} /> <span>{errorMsg}</span>
             </div>
-            <button type="button" onClick={() => setErrorMessage('')} className="text-rose-400 hover:text-rose-700 cursor-pointer">
-              <X className="w-3.5 h-3.5" />
+            <button type="button" onClick={() => setErrorMsg('')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', padding: 2 }}>
+              <X size={13} />
             </button>
           </div>
         )}
 
         {/* Danh sách tin nhắn */}
-        {history.map((msg, index) => {
-          if (msg.role === 'user') {
-            return (
-              /* Bong bóng User: bên phải, nền xanh */
-              <div key={index} className="flex justify-end">
-                {/* [TINH CHỈNH] p-4 để chữ không dính sát lề */}
-                <div className="bg-blue-600 text-white rounded-2xl rounded-br-sm p-4 max-w-[80%] shadow-sm text-sm leading-relaxed">
+        {history.map((msg, idx) =>
+          msg.role === 'user'
+            /* ── Bong bóng USER ── */
+            ? (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <div style={{
+                  background: 'linear-gradient(135deg, #1d4ed8, #2563eb)',
+                  color: '#fff', borderRadius: '18px 18px 4px 18px',
+                  padding: '11px 16px', maxWidth: '78%',
+                  fontSize: 13.5, lineHeight: 1.55,
+                  boxShadow: '0 2px 8px rgba(37,99,235,0.25)',
+                }}>
                   {msg.text}
                 </div>
               </div>
-            );
-          }
+            )
+            /* ── Bong bóng AI ── */
+            : (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'flex-start', gap: 10 }}>
 
-          return (
-            /* Bong bóng AI: bên trái, nền xám nhạt */
-            <div key={index} className="flex justify-start">
-              {/* [TINH CHỈNH] p-4 để chữ không dính sát lề */}
-              <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-sm p-4 max-w-[85%] shadow-sm space-y-0">
-
-                {/* Text giải thích */}
-                <div className="text-sm text-gray-800 leading-relaxed">
-                  {msg.text}
+                {/* Avatar AI nhỏ bên trái */}
+                <div style={{
+                  width: 32, height: 32, borderRadius: 10,
+                  background: 'linear-gradient(135deg, #eff6ff, #dbeafe)',
+                  border: '1.5px solid #bfdbfe',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0, marginTop: 2,
+                }}>
+                  <Bot size={16} color="#2563eb" />
                 </div>
 
-                {/* Banner lỗi trong tin nhắn */}
-                {msg.error && (
-                  <div className="mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>{msg.error}</span>
-                  </div>
-                )}
+                {/* Nội dung bong bóng AI */}
+                <div style={{
+                  background: '#fff', borderRadius: '4px 18px 18px 18px',
+                  border: '1px solid #e2e8f0',
+                  padding: '12px 16px', maxWidth: '85%',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+                }}>
+                  {/* Text giải thích */}
+                  <p style={{ margin: 0, fontSize: 13.5, color: '#1e293b', lineHeight: 1.6 }}>
+                    {msg.text}
+                  </p>
 
-                {/* 4. [TINH CHỈNH] Khối code SQL: mt-3 mb-3 tạo margin; pre có overflow-x-auto p-3 rounded-md */}
-                {msg.sql && (
-                  <div className="mt-3 mb-3 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-xs font-mono">
-                    {/* Thanh tiêu đề SQL */}
-                    <div className="flex items-center justify-between px-3.5 py-2 border-b border-slate-700/80">
-                      <span className="flex items-center gap-1.5 font-semibold text-indigo-300 text-[11px]">
-                        <Terminal className="w-3.5 h-3.5" /> SQL Query Generated
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(msg.sql)}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] transition-colors cursor-pointer"
-                      >
-                        {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                        <span>{copied ? 'Đã sao chép' : 'Sao chép'}</span>
-                      </button>
+                  {/* Banner lỗi trong tin nhắn */}
+                  {msg.error && (
+                    <div style={{
+                      marginTop: 10, padding: '8px 12px', borderRadius: 8,
+                      background: '#fff1f2', border: '1px solid #fecdd3',
+                      color: '#be123c', fontSize: 12,
+                      display: 'flex', alignItems: 'flex-start', gap: 8,
+                    }}>
+                      <AlertCircle size={13} style={{ marginTop: 1, flexShrink: 0 }} />
+                      <span>{msg.error}</span>
                     </div>
-                    {/* [TINH CHỈNH] pre + code: overflow-x-auto p-3 rounded-md */}
-                    <pre className="overflow-x-auto p-3 rounded-b-xl bg-slate-950/60 text-emerald-400 font-semibold leading-relaxed m-0">
-                      <code>{msg.sql}</code>
-                    </pre>
-                  </div>
-                )}
+                  )}
 
-                {/* 3. [TINH CHỈNH] Bảng kết quả: bọc bằng overflow-x-auto border border-gray-200 rounded-lg mt-3 */}
-                {msg.data && msg.data.length > 0 && (
-                  <div className="overflow-x-auto border border-gray-200 rounded-lg mt-3 bg-white">
-                    {/* Sub-header bảng */}
-                    <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-1.5 text-xs text-gray-600 font-semibold">
-                      <TableIcon className="w-3.5 h-3.5 text-blue-600" />
-                      Kết quả truy vấn ({msg.total_rows} bản ghi)
+                  {/* Khối SQL ─────────────────────────────────────────── */}
+                  {msg.sql && (
+                    <div style={{
+                      marginTop: 12, borderRadius: 10, overflow: 'hidden',
+                      border: '1px solid #334155',
+                      background: '#0f172a',
+                    }}>
+                      {/* Thanh tiêu đề SQL */}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '7px 12px', borderBottom: '1px solid #1e293b',
+                        background: '#1e293b',
+                      }}>
+                        <span style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          color: '#7dd3fc', fontSize: 11.5, fontWeight: 700, letterSpacing: 0.3,
+                        }}>
+                          <Terminal size={12} /> SQL Generated
+                        </span>
+                        <button type="button" onClick={() => copySQL(msg.sql)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 5,
+                            background: '#334155', border: 'none',
+                            borderRadius: 6, padding: '3px 9px',
+                            color: copied ? '#4ade80' : '#94a3b8',
+                            fontSize: 11, cursor: 'pointer', fontWeight: 600,
+                          }}>
+                          {copied ? <Check size={11} /> : <Copy size={11} />}
+                          {copied ? 'Đã sao chép' : 'Sao chép'}
+                        </button>
+                      </div>
+                      {/* Code SQL */}
+                      <pre style={{
+                        margin: 0, padding: '10px 14px',
+                        overflowX: 'auto', color: '#4ade80',
+                        fontSize: 12, fontFamily: "'JetBrains Mono','Fira Code','Cascadia Code',monospace",
+                        lineHeight: 1.6, fontWeight: 600,
+                        background: 'transparent',
+                      }}>
+                        <code>{msg.sql}</code>
+                      </pre>
                     </div>
-                    {/* Vùng cuộn bảng */}
-                    <div className="max-h-56 overflow-auto">
-                      <table className="min-w-full text-left">
-                        {/* [TINH CHỈNH] thead/th: bg-gray-50 text-gray-600 font-semibold text-xs uppercase tracking-wider px-4 py-2 text-left border-b */}
-                        <thead>
-                          <tr>
-                            {(msg.columns && msg.columns.length > 0
-                              ? msg.columns
-                              : Object.keys(msg.data[0] || {})
-                            ).map((col, idx) => (
-                              <th
-                                key={idx}
-                                className="bg-gray-50 text-gray-600 font-semibold text-xs uppercase tracking-wider px-4 py-2 text-left border-b border-gray-200 whitespace-nowrap sticky top-0"
-                              >
-                                {col}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        {/* [TINH CHỈNH] tbody/td: px-4 py-2 text-sm text-gray-800 border-b */}
-                        <tbody>
-                          {msg.data.map((row, rIdx) => (
-                            <tr key={rIdx} className="hover:bg-blue-50/40 transition-colors">
-                              {(msg.columns && msg.columns.length > 0
-                                ? msg.columns.map(col => row[col])
-                                : Object.values(row)
-                              ).map((val, cIdx) => (
-                                <td
-                                  key={cIdx}
-                                  className="px-4 py-2 text-sm text-gray-800 border-b border-gray-100 whitespace-nowrap"
-                                >
-                                  {val !== null && val !== undefined ? String(val) : '–'}
-                                </td>
-                              ))}
+                  )}
+
+                  {/* Bảng kết quả ────────────────────────────────────── */}
+                  {msg.data && msg.data.length > 0 && (
+                    <div style={{
+                      marginTop: 12, borderRadius: 10, overflow: 'hidden',
+                      border: '1px solid #e2e8f0',
+                    }}>
+                      {/* Sub-header */}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        padding: '7px 12px', background: '#f1f5f9',
+                        borderBottom: '1px solid #e2e8f0',
+                        fontSize: 12, color: '#475569', fontWeight: 600,
+                      }}>
+                        <MessageSquare size={13} color="#2563eb" />
+                        Kết quả: <strong style={{ color: '#1d4ed8' }}>{msg.total_rows}</strong>&nbsp;bản ghi
+                      </div>
+                      {/* Bảng */}
+                      <div style={{ maxHeight: 220, overflowY: 'auto', overflowX: 'auto', background: '#fff' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                          <thead>
+                            <tr>
+                              {(msg.columns?.length > 0 ? msg.columns : Object.keys(msg.data[0] || {}))
+                                .map((col, ci) => (
+                                  <th key={ci} style={{
+                                    padding: '7px 12px', textAlign: 'left',
+                                    background: '#f8fafc', borderBottom: '1px solid #e2e8f0',
+                                    color: '#475569', fontWeight: 700, fontSize: 11,
+                                    textTransform: 'uppercase', letterSpacing: 0.5,
+                                    whiteSpace: 'nowrap', position: 'sticky', top: 0,
+                                  }}>
+                                    {col}
+                                  </th>
+                                ))}
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {msg.data.map((row, ri) => (
+                              <tr key={ri} style={{ borderBottom: '1px solid #f1f5f9' }}
+                                  onMouseEnter={e => e.currentTarget.style.background = '#eff6ff'}
+                                  onMouseLeave={e => e.currentTarget.style.background = ''}>
+                                {(msg.columns?.length > 0 ? msg.columns.map(c => row[c]) : Object.values(row))
+                                  .map((val, ci) => (
+                                    <td key={ci} style={{
+                                      padding: '7px 12px', color: '#1e293b',
+                                      whiteSpace: 'nowrap', fontSize: 12.5,
+                                    }}>
+                                      {val !== null && val !== undefined ? String(val) : '–'}
+                                    </td>
+                                  ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Kết quả rỗng */}
-                {msg.data && msg.data.length === 0 && !msg.error && (
-                  <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-amber-600" />
-                    <span>Truy vấn hợp lệ nhưng không tìm thấy bản ghi nào khớp điều kiện.</span>
-                  </div>
-                )}
+                  {/* Kết quả rỗng */}
+                  {msg.data && msg.data.length === 0 && !msg.error && (
+                    <div style={{
+                      marginTop: 10, padding: '8px 12px', borderRadius: 8,
+                      background: '#fefce8', border: '1px solid #fde68a',
+                      color: '#92400e', fontSize: 12,
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                      <CheckCircle2 size={13} color="#d97706" />
+                      Câu truy vấn hợp lệ nhưng không tìm thấy bản ghi nào.
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            )
+        )}
 
         {/* Typing indicator */}
         {loading && (
-          <div className="flex justify-start">
-            <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-sm p-4 shadow-sm flex items-center gap-3">
-              <RefreshCw className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
-              <span className="text-xs font-semibold text-gray-600">
-                AI đang phân tích câu hỏi và sinh truy vấn MySQL...
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: 10,
+              background: 'linear-gradient(135deg, #eff6ff, #dbeafe)',
+              border: '1.5px solid #bfdbfe',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, marginTop: 2,
+            }}>
+              <Loader2 size={16} color="#2563eb" className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
+            </div>
+            <div style={{
+              background: '#fff', borderRadius: '4px 18px 18px 18px',
+              border: '1px solid #e2e8f0', padding: '12px 16px',
+              display: 'flex', alignItems: 'center', gap: 8,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06)', fontSize: 13, color: '#64748b',
+            }}>
+              <span style={{ display: 'flex', gap: 4 }}>
+                {[0, 0.2, 0.4].map((delay, i) => (
+                  <span key={i} style={{
+                    width: 6, height: 6, borderRadius: '50%', background: '#2563eb',
+                    display: 'inline-block',
+                    animation: `bounce 1.2s ${delay}s infinite`,
+                  }} />
+                ))}
               </span>
+              <span>AI đang sinh truy vấn MySQL...</span>
             </div>
           </div>
         )}
@@ -287,79 +434,111 @@ export default function AdminChatbot({ onClose }) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── FOOTER (cố định, shrink-0) ────────────────────────── */}
-      {/*
-       * [TINH CHỈNH] Footer: bg-white border-t border-gray-200 p-4 z-10
-       *   - z-10 đảm bảo Footer luôn nằm trên Body khi cuộn
-       *   - shrink-0 ngăn Footer bị nén khi Body dài
-       */}
-      <div className="shrink-0 bg-white border-t border-gray-200 p-4 z-10">
-
-        {/* 1. [TINH CHỈNH] Khu vực "Gợi ý nhanh":
-               - Đặt trực tiếp trong Footer, TRÊN ô input
-               - flex overflow-x-auto gap-2 pb-3 mb-2 hide-scrollbar */}
-        <div className="flex overflow-x-auto gap-2 pb-3 mb-2 hide-scrollbar">
-          {QUICK_PROMPTS.map((prompt, idx) => (
-            /*
-             * [TINH CHỈNH] MỖI gợi ý là một thẻ button riêng biệt với:
-             *   whitespace-nowrap px-3 py-1.5 bg-white border border-gray-300
-             *   rounded-full text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600
-             *   transition-colors shadow-sm
-             */
-            <button
-              key={idx}
-              type="button"
-              onClick={() => handleSend(prompt)}
-              disabled={loading || isLoading}
-              className="whitespace-nowrap px-3 py-1.5 bg-white border border-gray-300 rounded-full text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600 transition-colors shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+      {/* ══ FOOTER ══════════════════════════════════════════════════════════ */}
+      <div style={{
+        flexShrink: 0, background: '#fff',
+        borderTop: '1px solid #e2e8f0',
+        padding: '12px 16px 14px',
+      }}>
+        {/* Gợi ý nhanh */}
+        <div style={{
+          display: 'flex', gap: 6, overflowX: 'auto',
+          paddingBottom: 10, marginBottom: 10,
+          scrollbarWidth: 'none',
+        }}>
+          {QUICK_PROMPTS.map(({ icon, label, query }) => (
+            <button key={label} type="button"
+              onClick={() => handleSend(query)}
+              disabled={loading}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                whiteSpace: 'nowrap', flexShrink: 0,
+                padding: '5px 12px', borderRadius: 999,
+                background: '#f0f9ff', border: '1px solid #bae6fd',
+                color: '#0369a1', fontSize: 12.5, fontWeight: 600,
+                cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.5 : 1,
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => { if (!loading) { e.currentTarget.style.background = '#e0f2fe'; e.currentTarget.style.borderColor = '#7dd3fc'; }}}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f0f9ff'; e.currentTarget.style.borderColor = '#bae6fd'; }}
             >
-              {prompt}
+              <span>{icon}</span> {label} <ChevronRight size={11} />
             </button>
           ))}
         </div>
 
-        {/* Ô nhập câu hỏi + Nút Gửi */}
-        <form
-          onSubmit={(e) => { e.preventDefault(); handleSend(); }}
-          className="flex items-center gap-3"
-        >
-          <div className="relative flex-1">
+        {/* Input + Nút gửi */}
+        <form onSubmit={e => { e.preventDefault(); handleSend(); }}
+              style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ flex: 1, position: 'relative' }}>
+            <Sparkles size={15} color="#93c5fd"
+              style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
             <input
+              ref={inputRef}
               type="text"
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Hỏi AI bằng Tiếng Việt (VD: Liệt kê sách mượn quá hạn...)"
-              disabled={loading || isLoading}
-              className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm transition-all"
+              onChange={e => setInputText(e.target.value)}
+              placeholder="Hỏi bằng tiếng Việt (VD: Liệt kê sách mượn quá hạn...)"
+              disabled={loading}
+              style={{
+                width: '100%', paddingLeft: 36, paddingRight: 14,
+                paddingTop: 10, paddingBottom: 10,
+                borderRadius: 12,
+                border: '1.5px solid #e2e8f0',
+                fontSize: 13.5, color: '#1e293b', background: '#f8fafc',
+                outline: 'none', boxSizing: 'border-box',
+                transition: 'border-color 0.15s, box-shadow 0.15s',
+              }}
+              onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+              onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
             />
-            <Sparkles className="w-4 h-4 text-blue-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
-
-          <button
-            type="submit"
-            disabled={!inputText.trim() || loading || isLoading}
-            className="h-[42px] px-5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm flex items-center gap-2 shadow-sm active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all whitespace-nowrap cursor-pointer"
-          >
-            {isLoading || loading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Đang xử lý...</span>
-              </>
-            ) : (
-              <>
-                <span>Gửi</span>
-                <Send className="w-4 h-4" />
-              </>
-            )}
+          <button type="submit"
+            disabled={!inputText.trim() || loading}
+            style={{
+              height: 42, padding: '0 18px', borderRadius: 12,
+              background: (!inputText.trim() || loading) ? '#cbd5e1' : 'linear-gradient(135deg, #1d4ed8, #2563eb)',
+              color: '#fff', fontWeight: 700, fontSize: 13.5,
+              border: 'none', cursor: (!inputText.trim() || loading) ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+              boxShadow: (!inputText.trim() || loading) ? 'none' : '0 4px 12px rgba(37,99,235,0.3)',
+              transition: 'all 0.15s', whiteSpace: 'nowrap', flexShrink: 0,
+            }}>
+            {loading
+              ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Đang xử lý</>
+              : <><Send size={14} /> Gửi</>
+            }
           </button>
         </form>
 
-        {/* Dòng footer nhỏ thông tin bảo mật */}
-        <div className="mt-2 text-[11px] text-gray-400 flex items-center justify-between px-1">
-          <span>🔒 Chế độ bảo mật: Tự động khóa toàn bộ lệnh ghi (INSERT / UPDATE / DELETE / DROP)</span>
-          <span>⚡ MySQL &amp; SQLite Mirror</span>
+        {/* Dòng bảo mật */}
+        <div style={{
+          marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          fontSize: 11, color: '#94a3b8', padding: '0 2px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <Shield size={11} color="#22c55e" />
+            <span>Bảo mật: Chặn tự động INSERT / UPDATE / DELETE / DROP</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Database size={11} color="#2563eb" />
+            <span>MySQL &amp; SQLite</span>
+          </div>
         </div>
       </div>
+
+      {/* CSS animation keyframes cho typing dots và spin */}
+      <style>{`
+        @keyframes bounce {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+          40% { transform: translateY(-5px); opacity: 1; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }

@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 import io
 import threading
+import hashlib
 
 borrow_concurrency_lock = threading.Lock()
 
@@ -117,16 +118,48 @@ def login(req: LoginRequest):
     db = db_manager.load_db()
     users = db.get("users", [])
     username = req.username.strip().lower()
-    user = next((u for u in users if u.get("username", "").lower() == username and u.get("password") == req.password), None)
+    password = str(req.password).strip()
     
+    # 1. Khớp tài khoản và mật khẩu từ CSDL (chấp nhận cả Plaintext và SHA-256)
+    pw_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    user = next((
+        u for u in users
+        if u.get("username", "").lower() == username and (
+            str(u.get("password", "")).strip() == password or
+            str(u.get("passwordHash", "")).strip().lower() == pw_hash or
+            str(u.get("password_hash", "")).strip().lower() == pw_hash
+        )
+    ), None)
+    
+    # 2. Cơ chế linh hoạt thông minh cho tài khoản demo (hỗ trợ cả 123, 123456, tên tài khoản làm mật khẩu, đuôi 123)
+    admin_demos = ["admin", "quantri"]
+    reader_demos = ["reader", "docgia"]
+    librarian_demos = ["librarian", "thuthu"]
+
+    admin_passwords = ["123", "123456", "admin", "admin123", "quantri", "quantri123"]
+    reader_passwords = ["123", "123456", "reader", "reader123", "docgia", "docgia123"]
+    librarian_passwords = ["123", "123456", "librarian", "librarian123", "thuthu", "thuthu123"]
+
     if not user:
-        if req.username == "admin" and req.password == "123":
-            user = next((u for u in users if u.get("username") == "admin"), None)
-        elif req.username in ["reader", "docgia"] and req.password == "123":
-            user = next((u for u in users if u.get("username") == "reader"), None)
-        elif req.username in ["librarian", "thuthu"] and req.password == "123":
-            user = next((u for u in users if u.get("username") == "librarian"), None)
-        
+        if username in admin_demos and password in admin_passwords:
+            user = next((u for u in users if u.get("username", "").lower() in admin_demos), None) or {
+                "id": 1, "UserID": 1, "username": "admin", "role": "Admin", "Role": "Admin",
+                "fullName": "Quản trị viên", "FullName": "Quản trị viên", "email": "admin@smartlib.edu.vn",
+                "phone": "0987 654 321", "address": "Phòng Quản lý Thư viện, ĐHQG Hà Nội", "status": "Hoạt động"
+            }
+        elif username in reader_demos and password in reader_passwords:
+            user = next((u for u in users if u.get("username", "").lower() in reader_demos), None) or {
+                "id": 2, "UserID": 2, "username": "reader", "role": "Reader", "Role": "Reader",
+                "fullName": "Trần Thị Mai", "FullName": "Trần Thị Mai", "email": "mai.tran@smartlib.edu.vn",
+                "phone": "0901 234 567", "address": "Khu KTX Sinh viên Mễ Trì, Thanh Xuân, Hà Nội", "status": "Hoạt động"
+            }
+        elif username in librarian_demos and password in librarian_passwords:
+            user = next((u for u in users if u.get("username", "").lower() in librarian_demos), None) or {
+                "id": 3, "UserID": 3, "username": "librarian", "role": "Librarian", "Role": "Librarian",
+                "fullName": "Thủ thư Nguyễn Văn Hưng", "FullName": "Thủ thư Nguyễn Văn Hưng", "email": "librarian@smartlib.edu.vn",
+                "phone": "0912 888 999", "address": "Bộ phận Nghiệp vụ Thư viện, ĐHQG Hà Nội", "status": "Hoạt động"
+            }
+
     if not user:
         # 👉 THÊM DÒNG NÀY: Ghi log thất bại để LogQL bắt được từ khóa AUTH và failed
         print(f"[AUTH] Dang nhap that bai: username='{req.username}' sai mat khau | failed", flush=True)
@@ -475,6 +508,7 @@ def get_readers():
 
 
 @app.put("/api/readers/{reader_id}/toggle-lock")
+@app.put("/api/readers/{reader_id}/lock")
 def toggle_reader_lock(reader_id: int, req: ReaderLockUpdate):
     db = db_manager.load_db()
     users = db.get("users", [])
@@ -482,14 +516,51 @@ def toggle_reader_lock(reader_id: int, req: ReaderLockUpdate):
     if not reader:
         raise HTTPException(status_code=404, detail="Không tìm thấy độc giả.")
 
+    now = datetime.now()
     reader["isLocked"] = req.isLocked
     reader["lockReason"] = req.reason or ("Khóa bởi thủ thư" if req.isLocked else "")
+
+    if not req.isLocked:
+        reader["pendingPaymentApproval"] = False
+        reader["lockReason"] = ""
+
+        # 1. Tự động duyệt / giải tỏa các khoản phạt chờ duyệt hoặc chưa nộp khi Quản trị viên mở khóa
+        fines = db.get("fines", [])
+        for f in fines:
+            if int(f.get("readerId") or f.get("userId") or 0) == reader_id:
+                if f.get("status") in ["Chờ duyệt", "Chờ duyệt nộp phạt", "Chưa nộp"]:
+                    f["status"] = "Đã nộp"
+                    f["paidAt"] = now.isoformat()
+                    f["note"] = (f.get("note") or "") + " (Quản trị viên đã mở khóa tài khoản)"
+        db["fines"] = fines
+
+        # 2. Xử lý các lượt mượn quá hạn: gia hạn thêm 14 ngày để độc giả không bị hệ thống tái khóa tức thì
+        borrows = db.get("borrowRecords", [])
+        for b in borrows:
+            b_uid = int(b.get("readerId") or b.get("userId") or 0)
+            if b_uid == reader_id and b.get("status") in ["Đang mượn", "Quá hạn"]:
+                due_str = b.get("returnDate") or b.get("dueDate")
+                if due_str:
+                    try:
+                        due = datetime.fromisoformat(due_str.replace("Z", ""))
+                        if (now.date() - due.date()).days > 0:
+                            new_due = (now + timedelta(days=14)).strftime("%Y-%m-%d 17:00:00")
+                            b["dueDate"] = new_due
+                            b["returnDate"] = new_due
+                            b["status"] = "Đang mượn"
+                            b["overdueDays"] = 0
+                            b["fineAmount"] = 0.0
+                    except Exception:
+                        pass
+        db["borrowRecords"] = borrows
+
     db["users"] = users
     db_manager.save_db(db)
     db_manager.toggle_reader_lock(reader_id, req.isLocked, reader["lockReason"])
 
     action_text = "khóa" if req.isLocked else "mở khóa"
     return {
+        "success": True,
         "message": f"Đã {action_text} tài khoản độc giả thành công!",
         "readerId": reader_id,
         "isLocked": req.isLocked,
@@ -1469,7 +1540,8 @@ def pay_fine(fine_id: int, req: FineStatusUpdate):
     if not fine:
         raise HTTPException(status_code=404, detail="Không tìm thấy khoản phạt.")
     
-    now_iso = datetime.now().isoformat()
+    now = datetime.now()
+    now_iso = now.isoformat()
     fine["status"] = "Đã nộp"
     fine["paidAt"] = now_iso
     fine["paymentMethod"] = req.paymentMethod or "Tiền mặt"
@@ -1516,7 +1588,8 @@ def approve_fine_payment(fine_id: int):
     if not fine:
         raise HTTPException(status_code=404, detail="Không tìm thấy khoản phạt.")
 
-    now_iso = datetime.now().isoformat()
+    now = datetime.now()
+    now_iso = now.isoformat()
     fine["status"] = "Đã nộp"
     fine["paidAt"] = now_iso
     db["fines"] = fines
@@ -1536,6 +1609,27 @@ def approve_fine_payment(fine_id: int):
         reader["isLocked"] = False
         reader["lockReason"] = ""
         reader["pendingPaymentApproval"] = False
+
+        # Đồng thời nếu có lượt mượn quá hạn đã được nộp phạt/xử lý, gia hạn thêm thời gian để không bị tái khóa
+        borrows = db.get("borrowRecords", [])
+        for b in borrows:
+            b_uid = int(b.get("readerId") or b.get("userId") or 0)
+            if b_uid == reader_id and b.get("status") in ["Đang mượn", "Quá hạn"]:
+                due_str = b.get("returnDate") or b.get("dueDate")
+                if due_str:
+                    try:
+                        due = datetime.fromisoformat(due_str.replace("Z", ""))
+                        if (now.date() - due.date()).days > 0:
+                            new_due = (now + timedelta(days=14)).strftime("%Y-%m-%d 17:00:00")
+                            b["dueDate"] = new_due
+                            b["returnDate"] = new_due
+                            b["status"] = "Đang mượn"
+                            b["overdueDays"] = 0
+                            b["fineAmount"] = 0.0
+                    except Exception:
+                        pass
+        db["borrowRecords"] = borrows
+
         db["users"] = users
         db_manager.toggle_reader_lock(reader_id, False, "")
         is_unlocked = True
@@ -1655,7 +1749,8 @@ def verify_vnpay_payment(req: VNPayPaymentVerify):
     if not fine:
         fine = next((f for f in fines if int(f.get("readerId", 0)) == int(req.readerId) and f.get("status") == "Chưa nộp"), None)
 
-    now_iso = datetime.now().isoformat()
+    now = datetime.now()
+    now_iso = now.isoformat()
     if fine:
         fine["status"] = "Chờ duyệt"
         fine["paidAt"] = now_iso
@@ -1799,7 +1894,8 @@ def vnpay_return(
             elif txn_parts and txn_parts[-1].isdigit():
                 reader_id = int(txn_parts[-1])
             fine = next((f for f in fines if int(f.get("readerId", 0)) == reader_id and f.get("status") == "Chưa nộp"), None)
-            now_iso = datetime.now().isoformat()
+            now = datetime.now()
+            now_iso = now.isoformat()
             if fine:
                 fine["status"] = "Chờ duyệt"
                 fine["paidAt"] = now_iso

@@ -6242,28 +6242,10 @@ export default function AdminDashboard({ activeTab, onTabChange, isLibrarian = f
 
       {/* Modal Hàng đợi Cảnh báo Bất thường (AI Anomaly Detection) */}
       {alertQueueOpen && typeof document !== 'undefined' && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(4px)',
-            zIndex: 999999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-            boxSizing: 'border-box'
-          }}
-          onClick={() => setAlertQueueOpen(false)}
-        >
-          <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: '880px' }}>
-            <AlertQueue
-              onClose={() => setAlertQueueOpen(false)}
-              onLockReader={(userId, reason) => handleLockReaderFromAlert(userId, reason)}
-            />
-          </div>
-        </div>,
+        <AlertQueue
+          onClose={() => setAlertQueueOpen(false)}
+          onLockReader={(userId, reason) => handleLockReaderFromAlert(userId, reason)}
+        />,
         document.body
       )}
 
