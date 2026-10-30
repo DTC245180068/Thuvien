@@ -178,6 +178,10 @@ export const AuthProvider = ({ children }) => {
       sessionStorage.setItem('currentUserRole', uRole);
       localStorage.setItem('currentUser', JSON.stringify(normalized));
       localStorage.setItem('currentUserRole', uRole);
+      if (res && res.token) {
+        localStorage.setItem('token', res.token);
+        sessionStorage.setItem('token', res.token);
+      }
       return normalized;
     }
     throw new Error('Đăng nhập không thành công');
@@ -203,8 +207,10 @@ export const AuthProvider = ({ children }) => {
     setRole(null);
     sessionStorage.removeItem('currentUser');
     sessionStorage.removeItem('currentUserRole');
+    sessionStorage.removeItem('token');
     localStorage.removeItem('currentUser');
     localStorage.removeItem('currentUserRole');
+    localStorage.removeItem('token');
   };
 
   const updateUser = (updatedData) => {

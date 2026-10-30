@@ -248,9 +248,9 @@ Quy tắc BẮT BUỘC:
 """
 
     if gemini_key:
-        configured_model = (os.getenv("AI_MODEL") or "gemini-3.8-flash").strip()
+        configured_model = (os.getenv("AI_MODEL") or "gemini-1.5-flash").strip()
         candidate_models = []
-        for m in ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.1-flash-lite", configured_model]:
+        for m in [configured_model, "gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"]:
             if m and m not in candidate_models:
                 candidate_models.append(m)
 
@@ -611,10 +611,10 @@ async def handle_admin_query(req: AdminQueryRequest):
 
     # 3. Kiểm tra ngay trên câu hỏi tự nhiên nếu người dùng cố tình hỏi mật khẩu hoặc truyền SQL nguy hiểm
     clean_prompt = re.sub(r"--.*?$|/\*.*?\*/", "", user_prompt, flags=re.MULTILINE | re.DOTALL).strip()
-    if re.search(r"\b(password_hash|password|mật\s*khẩu|jwt_secret)\b", clean_prompt, flags=re.IGNORECASE):
+    if re.search(r"\b(password_hash|password|mật\s*khẩu|jwt_secret|api_key|api\s*key|secret_key|xin\s+pass|access_token)\b", clean_prompt, flags=re.IGNORECASE):
         raise HTTPException(
             status_code=403,
-            detail="Cảnh báo bảo mật: Không được phép truy xuất trường dữ liệu nhạy cảm (mật khẩu / khóa bảo mật)."
+            detail="Cảnh báo bảo mật: Không được phép truy xuất trường dữ liệu nhạy cảm (mật khẩu / khóa bảo mật / API Key)."
         )
 
     if direct_sql:

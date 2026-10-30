@@ -1,8 +1,8 @@
 # 🗄️ SMARTLIB — THIẾT KẾ KIẾN TRÚC & CƠ SỞ DỮ LIỆU TOÀN DIỆN (ERD 7 BẢNG CHUẨN 3NF MYSQL 8.0)
 **Mô hình Quan hệ Logic Chuẩn hóa, Kiến trúc Dual-Mode Persistence & Các Trường Dữ liệu Phục vụ AI**
-> **Học phần:** Ứng dụng trí tuệ nhân tạo | **Lớp:** K23.K1.KTPM K23A, B (HK1 2026–2027)  
+> **Học phần:** Ứng dụng trí tuệ nhân tạo | **Lớp:** KTPM K23B (HK1 2026–2027)  
 > **Giảng viên giảng dạy:** Nguyễn Thị Tuyển | **Khoa:** Công nghệ thông tin - ĐH CNTT&TT Thái Nguyên (ICTU)  
-> **Sinh viên thực hiện:** Nguyễn Trung Học — **MSSV:** DTC245180174  
+> **Nhóm sinh viên thực hiện (KTPM K23B):** Vũ Hồng Dũng (Nhóm Trưởng - DTC245180068), Nguyễn Trung Học (DTC245180174), Lê Quang Hưng (DTC245180036)  
 > **Chuẩn đầu ra đáp ứng:** `CLO1`, `CLO4` (Tiêu chí `1.3 Kiến trúc, CSDL hợp lý` & `1.4 Lý giải vị trí AI`)  
 > 📖 **Bộ tài liệu kỹ thuật SmartLib:** [📋 Yêu cầu (SRS)](requirements.md) | [📊 Ca sử dụng & Kiểm thử](use_cases.md) | [🗄️ Thiết kế CSDL (ERD 7 Bảng)](database_design.md) | [🤖 Nhật ký Prompt & AI Log](ai_log.md) | [🏠 Trang chủ README](../README.md)
 
@@ -305,7 +305,7 @@ Bảng chuyên biệt lưu trữ đầu ra của thuật toán dự báo nhu c�
 
 ## 4. ÁNH XẠ CSDL VÀO SCHEMA PROMPT CHO AI TEXT-TO-SQL & FUNCTION CALLING
 
-Để LLM sinh câu lệnh SQL chính xác 100% mà không bị lỗi tên cột (Hallucination) và không làm lộ dữ liệu mật, hệ thống sử dụng kỹ thuật **Schema Pruning (Tỉa gọn Schema)** khi đưa vào `DATABASE_SCHEMA_PROMPT` trong [`backend/ai_text2sql.py`](file:///d:/UDAI/Thuvien/backend/ai_text2sql.py):
+Để LLM sinh câu lệnh SQL chính xác 100% mà không bị lỗi tên cột (Hallucination) và không làm lộ dữ liệu mật, hệ thống sử dụng kỹ thuật **Schema Pruning (Tỉa gọn Schema)** khi đưa vào `DATABASE_SCHEMA_PROMPT` trong [`backend/ai_text2sql.py`](../backend/ai_text2sql.py):
 - Chỉ cung cấp tên bảng, tên cột nghiệp vụ và các giá trị `ENUM` tiếng Việt thực tế (`'Sẵn sàng'`, `'Hết sách'`, `'Chờ duyệt'`, `'Đang mượn'`, `'Đã trả'`).
 - **Ẩn hoàn toàn cột `password_hash`** khỏi `DATABASE_SCHEMA_PROMPT` gửi cho LLM, kết hợp thêm bộ lọc Regex tại tầng Backend chặn mọi truy vấn cố tình chạm vào từ khóa `password` hoặc `password_hash`.
 
@@ -322,7 +322,7 @@ Bảng chuyên biệt lưu trữ đầu ra của thuật toán dự báo nhu c�
 
 ## 6. TẬP LỆNH SQL DDL KHỞI TẠO CSDL MYSQL 8.0
 
-Tập lệnh khởi tạo đầy đủ 6 bảng cốt lõi và dữ liệu mẫu nằm tại [`database/smartlib_mysql.sql`](file:///d:/UDAI/Thuvien/database/smartlib_mysql.sql), và bảng thứ 7 (`ai_procurement`) cùng các cột Anomaly Detection được khởi tạo tự động qua migration trong [`backend/predictive_analysis.py`](file:///d:/UDAI/Thuvien/backend/predictive_analysis.py) và [`backend/anomaly_detection.py`](file:///d:/UDAI/Thuvien/backend/anomaly_detection.py).
+Tập lệnh khởi tạo đầy đủ 6 bảng cốt lõi và dữ liệu mẫu nằm tại [`database/smartlib_mysql.sql`](../database/smartlib_mysql.sql), và bảng thứ 7 (`ai_procurement`) cùng các cột Anomaly Detection được khởi tạo tự động qua migration trong [`backend/predictive_analysis.py`](../backend/predictive_analysis.py) và [`backend/anomaly_detection.py`](../backend/anomaly_detection.py).
 
 ---
 

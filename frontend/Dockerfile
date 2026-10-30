@@ -26,10 +26,10 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Cấu hình Nginx reverse proxy và SPA routing
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY certs /etc/nginx/certs
 
-# Mở cổng HTTP
-EXPOSE 80
+# Mở cổng HTTP và HTTPS
+EXPOSE 80 443
 
 # Chạy Nginx ở chế độ foreground
 CMD ["nginx", "-g", "daemon off;"]
-

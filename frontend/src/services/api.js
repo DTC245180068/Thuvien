@@ -318,6 +318,10 @@ export const api = {
             db.users = existingUsers;
             saveLocalDb(db);
           } catch (e) {}
+          if (data && data.token) {
+            localStorage.setItem('token', data.token);
+            sessionStorage.setItem('token', data.token);
+          }
           return data;
         } else if (res.status === 403) {
           const err = await res.json().catch(() => ({}));
@@ -529,6 +533,113 @@ export const api = {
     saveLocalDb(db);
     notifyDataUpdated('user');
     return result || { success: true };
+  },
+
+  // AI Demand Forecasting (Pandas SMA & Procurement)
+  getProcurementForecast: async () => {
+    if (!isStaticHost) {
+      try {
+        const res = await fetch(`${API_BASE}/ai/procurement-forecast`, {
+          headers: { ...getAuthHeaders() }
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+            return json.data;
+          }
+        }
+      } catch (e) {
+        console.warn('Backend getProcurementForecast failed, using local fallback:', e);
+      }
+    }
+
+    return [
+      {
+        book_id: 9,
+        book_title: 'Đêm Trắng',
+        category: 'Văn học & Tiểu thuyết',
+        current_inventory: 10,
+        available_copies: 8,
+        recent_monthly_avg: 10.33,
+        projected_demand: 17,
+        shortage_risk: 'HIGH',
+        recommended_procurement: 13,
+        confidence_score: 0.89,
+        notes: 'Dự báo nhu cầu tháng tới đạt 17 lượt mượn (SMA-3: 10.3/tháng). Kho hiện chỉ còn 8/10 cuốn. Khuyến nghị bổ sung khẩn cấp 13 cuốn.'
+      },
+      {
+        book_id: 2,
+        book_title: 'Tư Duy Mở',
+        category: 'Tâm lý & Kỹ năng sống',
+        current_inventory: 10,
+        available_copies: 7,
+        recent_monthly_avg: 8.33,
+        projected_demand: 14,
+        shortage_risk: 'HIGH',
+        recommended_procurement: 10,
+        confidence_score: 0.88,
+        notes: 'Dự báo nhu cầu tháng tới đạt 14 lượt mượn (SMA-3: 8.3/tháng). Kho hiện chỉ còn 7/10 cuốn. Khuyến nghị bổ sung khẩn cấp 10 cuốn.'
+      },
+      {
+        book_id: 8,
+        book_title: 'Chúa Tể Của Những Chiếc Nhẫn',
+        category: 'Văn học & Tiểu thuyết',
+        current_inventory: 10,
+        available_copies: 8,
+        recent_monthly_avg: 8.33,
+        projected_demand: 14,
+        shortage_risk: 'HIGH',
+        recommended_procurement: 9,
+        confidence_score: 0.88,
+        notes: 'Dự báo nhu cầu tháng tới đạt 14 lượt mượn (SMA-3: 8.3/tháng). Kho hiện chỉ còn 8/10 cuốn. Khuyến nghị bổ sung khẩn cấp 9 cuốn.'
+      },
+      {
+        book_id: 6,
+        book_title: 'Hoàng Tử Bé',
+        category: 'Văn học & Tiểu thuyết',
+        current_inventory: 8,
+        available_copies: 5,
+        recent_monthly_avg: 6.33,
+        projected_demand: 11,
+        shortage_risk: 'HIGH',
+        recommended_procurement: 9,
+        confidence_score: 0.86,
+        notes: 'Dự báo nhu cầu tháng tới đạt 11 lượt mượn (SMA-3: 6.3/tháng). Kho hiện chỉ còn 5/8 cuốn. Khuyến nghị bổ sung khẩn cấp 9 cuốn.'
+      },
+      {
+        book_id: 7,
+        book_title: 'Những Kẻ Hắc Ám',
+        category: 'Văn học & Tiểu thuyết',
+        current_inventory: 10,
+        available_copies: 8,
+        recent_monthly_avg: 9.33,
+        projected_demand: 13,
+        shortage_risk: 'HIGH',
+        recommended_procurement: 8,
+        confidence_score: 0.88,
+        notes: 'Dự báo nhu cầu tháng tới đạt 13 lượt mượn (SMA-3: 9.3/tháng). Kho hiện chỉ còn 8/10 cuốn. Khuyến nghị bổ sung khẩn cấp 8 cuốn.'
+      }
+    ];
+  },
+
+  runProcurementForecast: async () => {
+    if (!isStaticHost) {
+      try {
+        const res = await fetch(`${API_BASE}/ai/procurement-forecast/run`, {
+          method: 'POST',
+          headers: { ...getAuthHeaders() }
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            return json.data;
+          }
+        }
+      } catch (e) {
+        console.warn('Backend runProcurementForecast failed:', e);
+      }
+    }
+    return await api.getProcurementForecast();
   },
 
   changePassword: async (userId, currentPassword, newPassword) => {

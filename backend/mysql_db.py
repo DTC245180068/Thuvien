@@ -1161,6 +1161,26 @@ class MySQLDatabaseManager:
             lines.append("    INDEX idx_notif_is_read (is_read)")
             lines.append(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;\n")
 
+            lines.append("CREATE TABLE ai_procurement (")
+            lines.append("    id INT AUTO_INCREMENT PRIMARY KEY,")
+            lines.append("    book_id INT NOT NULL,")
+            lines.append("    book_title VARCHAR(255) NOT NULL,")
+            lines.append("    category VARCHAR(100) NULL,")
+            lines.append("    current_inventory INT NOT NULL DEFAULT 0,")
+            lines.append("    available_copies INT NOT NULL DEFAULT 0,")
+            lines.append("    recent_monthly_avg DECIMAL(10,2) NOT NULL DEFAULT 0.00,")
+            lines.append("    projected_demand INT NOT NULL DEFAULT 0,")
+            lines.append("    shortage_risk VARCHAR(50) NOT NULL DEFAULT 'HIGH',")
+            lines.append("    recommended_procurement INT NOT NULL DEFAULT 0,")
+            lines.append("    confidence_score DECIMAL(5,2) NOT NULL DEFAULT 0.00,")
+            lines.append("    analysis_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,")
+            lines.append("    notes TEXT NULL,")
+            lines.append("    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,")
+            lines.append("    CONSTRAINT fk_proc_book FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,")
+            lines.append("    INDEX idx_proc_book (book_id),")
+            lines.append("    INDEX idx_proc_risk (shortage_risk)")
+            lines.append(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;\n")
+
             # 1. Users
             if users:
                 lines.append("-- =====================================================================")

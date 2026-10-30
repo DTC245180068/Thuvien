@@ -16,6 +16,20 @@ const THINKING_MESSAGES = [
   'Đang tổng hợp thông tin gửi bạn nè... ✨'
 ];
 
+const renderFormattedMessage = (rawText) => {
+  if (!rawText) return null;
+  const parts = String(rawText).split(/(\*\*[^*]+\*\*|\*[^*\n]+\*)/g);
+  return parts.map((part, idx) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return <strong key={idx} style={{ fontWeight: 700 }}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+      return <em key={idx} style={{ fontStyle: 'italic' }}>{part.slice(1, -1)}</em>;
+    }
+    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  });
+};
+
 export default function AIChatWidget({ books = [] }) {
   const [isOpen, setIsOpen] = useState(false);
   const [sessionId, setSessionId] = useState(() => `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
@@ -367,28 +381,8 @@ export default function AIChatWidget({ books = [] }) {
 
                   <div style={{ maxWidth: '82%' }}>
                     <div style={{ padding: '11px 15px', borderRadius: isAi ? '6px 20px 20px 20px' : '20px 6px 20px 20px', background: isAi ? '#ffffff' : 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)', color: isAi ? '#1e293b' : '#ffffff', fontSize: '13px', lineHeight: 1.6, boxShadow: isAi ? '0 2px 8px rgba(0, 0, 0, 0.04)' : '0 4px 12px rgba(37, 99, 235, 0.2)', border: isAi ? '1px solid #e2e8f0' : 'none', wordBreak: 'break-word', whiteSpace: 'pre-line' }}>
-                      {/* Vết gọi hàm Function Calling minh chứng Mô hình 2 */}
-                      {isAi && msg.tool_call && (
-                        <div style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          marginBottom: '8px',
-                          padding: '3px 8px',
-                          background: '#f8fafc',
-                          border: '1px solid #e2e8f0',
-                          borderRadius: '6px',
-                          fontSize: '11px',
-                          fontFamily: 'monospace',
-                          boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
-                        }}>
-                          <span style={{ color: '#4f46e5', fontWeight: 700 }}>⚡ Tool:</span>
-                          <span style={{ color: '#0284c7', fontWeight: 600 }}>{msg.tool_call.name}()</span>
-                          <span style={{ color: '#16a34a', fontSize: '10px', fontWeight: 700 }}>✓ CSDL</span>
-                        </div>
-                      )}
 
-                      <div>{msg.text}</div>
+                      <div>{renderFormattedMessage(msg.text)}</div>
 
                       {/* Gợi ý sách theo schema chuẩn Word (suggested_books: [{book_id, title, reason}]) */}
                       {isAi && msg.suggested_books && msg.suggested_books.length > 0 && (
@@ -396,47 +390,53 @@ export default function AIChatWidget({ books = [] }) {
                           <div style={{ fontSize: '11px', fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                             ✨ Sách đề xuất phù hợp ({msg.suggested_books.length}):
                           </div>
-                          {msg.suggested_books.map((b, idx) => (
-                            <div
-                              key={idx}
-                              onClick={() => {
-                                if (b.book_id) {
-                                  window.dispatchEvent(new CustomEvent('smartlib:open-book-detail', { detail: { bookId: b.book_id } }));
-                                }
-                              }}
-                              style={{
-                                background: '#f8fafc',
-                                borderRadius: '8px',
-                                border: '1px solid #e2e8f0',
-                                padding: '8px 10px',
-                                transition: 'all 0.15s ease',
-                                cursor: b.book_id ? 'pointer' : 'default'
-                              }}
-                              onMouseEnter={(e) => {
-                                if (b.book_id) {
-                                  e.currentTarget.style.borderColor = '#93c5fd';
-                                  e.currentTarget.style.background = '#eff6ff';
-                                }
-                              }}
-                              onMouseLeave={(e) => {
-                                if (b.book_id) {
-                                  e.currentTarget.style.borderColor = '#e2e8f0';
-                                  e.currentTarget.style.background = '#f8fafc';
-                                }
-                              }}
-                              title={b.book_id ? 'Bấm để xem chi tiết cuốn sách này' : ''}
-                            >
-                              <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span>📖 {b.title}</span>
-                                {b.book_id && <span style={{ fontSize: '10.5px', color: '#2563eb', fontWeight: 600 }}>Xem sách →</span>}
-                              </div>
-                              {b.reason && (
-                                <div style={{ fontSize: '11.5px', color: '#4338ca', marginTop: '3px', background: '#eef2ff', padding: '3px 6px', borderRadius: '5px' }}>
-                                  💡 {b.reason}
+                          {msg.suggested_books.map((b, idx) => {
+                            const bId = b.book_id || b.id;
+                            const isClickable = Boolean(bId || b.title);
+                            return (
+                              <div
+                                key={idx}
+                                onClick={() => {
+                                  if (isClickable) {
+                                    window.dispatchEvent(new CustomEvent('smartlib:open-book-detail', { 
+                                      detail: { bookId: bId, title: b.title } 
+                                    }));
+                                  }
+                                }}
+                                style={{
+                                  background: '#f8fafc',
+                                  borderRadius: '8px',
+                                  border: '1px solid #e2e8f0',
+                                  padding: '8px 10px',
+                                  transition: 'all 0.15s ease',
+                                  cursor: isClickable ? 'pointer' : 'default'
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (isClickable) {
+                                    e.currentTarget.style.borderColor = '#93c5fd';
+                                    e.currentTarget.style.background = '#eff6ff';
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (isClickable) {
+                                    e.currentTarget.style.borderColor = '#e2e8f0';
+                                    e.currentTarget.style.background = '#f8fafc';
+                                  }
+                                }}
+                                title={isClickable ? 'Bấm để xem chi tiết cuốn sách này' : ''}
+                              >
+                                <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span>📖 {b.title}</span>
+                                  {isClickable && <span style={{ fontSize: '10.5px', color: '#2563eb', fontWeight: 600 }}>Xem sách →</span>}
                                 </div>
-                              )}
-                            </div>
-                          ))}
+                                {b.reason && (
+                                  <div style={{ fontSize: '11.5px', color: '#4338ca', marginTop: '3px', background: '#eef2ff', padding: '3px 6px', borderRadius: '5px' }}>
+                                    💡 {b.reason}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
